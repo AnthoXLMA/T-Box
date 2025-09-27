@@ -19,6 +19,7 @@ function App() {
     <Layout>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/tip" element={<TipPage />} />
         <Route path="/dashboard" element={
           <PrivateRoute>
             <Dashboard />

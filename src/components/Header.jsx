@@ -3,9 +3,10 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { FaUserCircle, FaSignOutAlt, FaTachometerAlt, FaChartBar, FaBars, FaTimes } from "react-icons/fa";
 import ModalStats from "./ModalStats";
-
 import { onAuthStateChanged, getIdTokenResult } from "firebase/auth";
 import { auth } from "../firebase";
+import TipBoxLogo from '../assets/TipBox.png';
+
 
 export default function Header({ user, onLogout, stats }) {
   const [showStats, setShowStats] = useState(false);
@@ -29,7 +30,11 @@ export default function Header({ user, onLogout, stats }) {
       <div className="container mx-auto flex flex-wrap justify-between items-center py-4 px-6">
         {/* Logo */}
         <div className="flex items-center space-x-3">
-          <img src="/logo.png" alt="TipBox Logo" className="h-10 w-10 rounded-full shadow-md" />
+        <img
+          src={TipBoxLogo}
+          alt="TipBox Logo"
+          className="h-10 w-10 rounded-full shadow-md"
+        />
           <h1 className="text-2xl font-extrabold tracking-wide drop-shadow-lg">TipBox</h1>
         </div>
 

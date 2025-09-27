@@ -9,7 +9,6 @@ import QRCode from "react-qr-code";
 import QRCodeLib from "qrcode";
 
 
-
 function Dashboard() {
   const [services, setServices] = useState([]);
   const [tips, setTips] = useState([]);
