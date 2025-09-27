@@ -8,6 +8,8 @@ import { auth, db } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import { FaHotel, FaUtensils, FaBuilding, FaMapMarkerAlt, FaPhone, FaSpa } from "react-icons/fa";
 import { doc, runTransaction } from "firebase/firestore";
+import TipBoxLogo from '../assets/TipBox.png';
+
 
 function LoginPage() {
   const [email, setEmail] = useState("");
@@ -112,11 +114,15 @@ function LoginPage() {
       {/* Branding */}
       <div className="md:w-1/2 bg-gradient-to-br from-blue-800 to-indigo-600 text-white flex flex-col justify-center items-center p-10 space-y-6">
         <div className="flex items-center space-x-3">
-          <FaHotel className="text-5xl" />
+          <img
+          src={TipBoxLogo}
+          alt="TipBox Logo"
+          className="h-20 w-20 rounded-full shadow-md"
+          />
           <h1 className="text-5xl font-extrabold tracking-wide drop-shadow-lg">TipBox</h1>
         </div>
         <p className="text-xl font-semibold text-center max-w-xs">
-          Une tirelire digitale pour vos équipiers
+          La tirelire de vos équipiers
         </p>
         <div className="flex space-x-4 mt-6">
           <FaHotel size={40} className="opacity-80" />
@@ -124,7 +130,6 @@ function LoginPage() {
           <FaSpa size={40} className="opacity-80" />
         </div>
       </div>
-
       {/* Login / Register */}
       <div className="md:w-1/2 flex flex-col justify-center items-center bg-gray-100 p-10 space-y-6">
         <h2 className="text-3xl font-bold text-gray-800">
