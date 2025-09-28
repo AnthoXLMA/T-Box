@@ -8,6 +8,7 @@ import { FaEnvelope, FaSms, FaPrint } from "react-icons/fa";
 import QRCodeLib from "qrcode";
 import ServiceAccessModal from "../components/ServiceAccessModal";
 import { fetchServices } from "../firebase"; // adapter le chemin
+import tipboxLogo from "../assets/TipBox.png";
 
 
 function Dashboard() {
@@ -70,33 +71,47 @@ function Dashboard() {
     if (!firstName || !lastName || !email) return alert("Veuillez compléter tous les champs");
 
     setCreatingUser(true);
+
     try {
+      // Appel backend pour créer l'utilisateur et envoyer email
       const res = await fetch("http://localhost:4242/create-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ firstName, lastName, email, role: userRole, hotelUid: uid, serviceIds: services.map(s => s.id) }),
+        body: JSON.stringify({
+          firstName,
+          lastName,
+          email,
+          role: userRole,
+          hotelUid: uid,
+          serviceIds: services.map(s => s.id),
+        }),
       });
+
       const data = await res.json();
+
       if (!res.ok || !data.success) throw new Error(data.error || "Erreur création utilisateur");
 
-      if (!data.isNewUser) return alert("Cet utilisateur existe déjà !");
+      if (!data.isNewUser) {
+        alert("Cet utilisateur existe déjà !");
+        return;
+      }
 
       alert("Utilisateur créé avec succès et email envoyé !");
       setNewUser({ firstName: "", lastName: "", email: "", role: "manager" });
     } catch (err) {
       console.error(err);
-      alert("Impossible de créer l'utilisateur");
+      alert("Impossible de créer l'utilisateur : " + err.message);
     } finally {
       setCreatingUser(false);
     }
   };
 
-
   const totalTips = tips.reduce((sum, t) => sum + t.amount, 0) / 100;
   const avgTip = tips.length ? (totalTips / tips.length).toFixed(2) : 0;
 
   const qrValue = selectedService
-    ? `${window.location.origin}?service=${selectedService.name}&uid=${uid}`
+    ? `${window.location.origin}/tip?service=${selectedService.name}&uid=${uid}`
+    // ? `${window.location.origin}?service=${selectedService.name}&uid=${uid}`
     : "";
 
   const handleSend = async () => {
@@ -125,22 +140,105 @@ function Dashboard() {
   };
 
   const handlePrint = async (service) => {
-    const value = `${window.location.origin}?service=${service.name}&uid=${uid}`;
-    try {
-      const svgString = await QRCodeLib.toString(value, { type: "svg", width: 300 });
-      const printWindow = window.open("", "_blank");
-      printWindow.document.write("<html><head><title>QR Code</title></head><body>");
-      printWindow.document.write(`<h3 style="text-align:center;">${service.name}</h3>`);
-      printWindow.document.write(`<div style="text-align:center;margin-top:20px;">${svgString}</div>`);
-      printWindow.document.write("</body></html>");
-      printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
-    } catch (err) {
-      console.error("Erreur génération QR code imprimable", err);
-      alert("Impossible de générer le QR code pour impression");
-    }
-  };
+  // const value = `${window.location.origin}?service=${service.name}&uid=${uid}`;
+  const value = `${window.location.origin}/tip?service=${service.name}&uid=${uid}`;
+
+  try {
+    const svgString = await QRCodeLib.toString(value, { type: "svg", width: 300 });
+    const printWindow = window.open("", "_blank");
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>QR Code ${service.name}</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              text-align: center;
+              margin: 0;
+              padding: 40px;
+              background: #fff;
+            }
+            .logo {
+              width: 150px;
+              margin-bottom: 20px;
+            }
+            h3 {
+              margin-bottom: 30px;
+            }
+            .qr-container {
+              margin-top: 20px;
+            }
+          </style>
+        </head>
+<body>
+  <div style="
+    font-family: 'Arial', sans-serif;
+    text-align: center;
+    margin: 0;
+    padding: 20px;
+    background: #fff;
+    width: 300px; /* largeur approximative du petit support */
+    box-sizing: border-box;
+  ">
+    <!-- Logo Tipbox -->
+    <div style="margin-bottom: 15px;">
+      <img src="${tipboxLogo}" alt="Tipbox Logo" style="
+        width: 120px;
+        display: block;
+        margin: 0 auto;
+      " />
+    </div>
+
+    <!-- QR Code avec encadré et ombre -->
+    <div style="
+      display: block;
+      width: 200px;
+      padding: 10px;
+      border: 2px solid #f0f0f0;
+      border-radius: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+      background: #fff;
+      margin: 15px auto;
+    ">
+      <div style="width:100%; height:auto;">
+        ${svgString.replace('<svg ', '<svg style="width:100%; height:auto;" ')}
+      </div>
+    </div>
+
+    <!-- Slogan / Call to action -->
+    <p style="
+      font-size: 14px;
+      color: #555;
+      margin: 5px 0 10px 0;
+    ">
+      Scannez ce QR code pour accéder à votre service Tipbox
+    </p>
+
+    <!-- Nom du service discret en bas -->
+    <h2 style="
+      font-size: 12px;
+      font-weight: normal;
+      color: #999;
+      margin: 0;
+    ">${service.name}</h2>
+  </div>
+</body>
+
+
+
+      </html>
+    `);
+
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  } catch (err) {
+    console.error("Erreur génération QR code imprimable", err);
+    alert("Impossible de générer le QR code pour impression");
+  }
+};
+
 
   if (!uid || loadingTips)
     return <div className="flex justify-center items-center h-screen">Chargement...</div>;

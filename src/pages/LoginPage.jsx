@@ -4,7 +4,6 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   onAuthStateChanged,
-  sendPasswordResetEmail
 } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { useNavigate } from "react-router-dom";
@@ -31,6 +30,15 @@ function LoginPage() {
   // Step formulaire
   const [step, setStep] = useState(1);
 
+  // Plan sélectionné
+  const [selectedPlan, setSelectedPlan] = useState(null);
+
+  const plans = [
+    { name: "Petit restaurant", monthlyFee: 15, includedQRCodes: 50 },
+    { name: "Hôtel moyen", monthlyFee: 30, includedQRCodes: 100 },
+    { name: "Grande chaîne", monthlyFee: 50, includedQRCodes: 300 },
+  ];
+
   // Redirection si déjà connecté
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -47,11 +55,7 @@ function LoginPage() {
   }, [navigate]);
 
   const isValidSiret = (siret) => /^\d{14}$/.test(siret);
-
-  const setErrorAndReturn = (msg) => {
-    setError(msg);
-    return false;
-  };
+  const setErrorAndReturn = (msg) => { setError(msg); return false; };
 
   const validateStep = () => {
     if (step === 1) {
@@ -63,14 +67,12 @@ function LoginPage() {
         return setErrorAndReturn("Tous les champs entreprise sont obligatoires, y compris le SIRET");
       if (!isValidSiret(hotelSiret)) return setErrorAndReturn("SIRET invalide (14 chiffres requis)");
     }
+    if (step === 3 && !selectedPlan) return setErrorAndReturn("Veuillez sélectionner un plan");
     setError("");
     return true;
   };
 
-  const handleNext = async () => {
-    if (validateStep()) setStep(prev => prev + 1);
-  };
-
+  const handleNext = () => { if (validateStep()) setStep(prev => prev + 1); };
   const handleBack = () => setStep(prev => prev - 1);
 
   const handleSubmit = async () => {
@@ -78,19 +80,21 @@ function LoginPage() {
 
     try {
       let userCredential;
+      let user;
 
       if (isRegister) {
-        // Création compte directeur/hôtel
+        // Création du compte Firebase
         userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const userId = userCredential.user.uid;
+        user = userCredential.user;
+        const userId = user.uid;
 
+        // Création des docs Firestore
         const siretRef = doc(db, "sirets", hotelSiret);
         const companyRef = doc(db, "companies", userId);
 
         await runTransaction(db, async (transaction) => {
           const siretDoc = await transaction.get(siretRef);
           if (siretDoc.exists()) throw new Error("Ce SIRET est déjà utilisé");
-
           transaction.set(siretRef, { companyId: userId });
           transaction.set(companyRef, {
             hotelName,
@@ -98,35 +102,36 @@ function LoginPage() {
             hotelPhone,
             hotelType,
             siret: hotelSiret,
+            plan: selectedPlan,
             createdAt: new Date()
           });
         });
 
+        // Appel backend pour définir le rôle et hotelUid
+        await fetch(`${process.env.REACT_APP_BACKEND_URL}/create-user`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email,
+            firstName: "",
+            lastName: "",
+            role: "director",
+            hotelUid: userId
+          })
+        });
+
+        // Forcer le refresh du token pour récupérer les customClaims
+        await user.getIdToken(true);
+
       } else {
-        // Connexion pour directeur, manager ou staff
-        try {
-          userCredential = await signInWithEmailAndPassword(auth, email, password);
-        } catch (err) {
-          if (err.code === "auth/wrong-password") {
-            alert("Mot de passe incorrect. Vous pouvez demander un réinitialisation si nécessaire.");
-          } else if (err.code === "auth/user-not-found") {
-            alert("Utilisateur non trouvé. Vérifiez l’email ou demandez au directeur un accès.");
-          } else {
-            console.error(err);
-            alert("Erreur de connexion");
-          }
-          return;
-        }
+        userCredential = await signInWithEmailAndPassword(auth, email, password);
+        user = userCredential.user;
       }
 
-      // Récupérer les custom claims pour rôle et serviceId
-      const user = userCredential.user;
+      // Récupérer les claims à jour
       const idTokenResult = await user.getIdTokenResult();
-      const userRole = idTokenResult.claims.role || "director"; // par défaut director
-      const serviceId = idTokenResult.claims.serviceId || null;
-
-      setRole(userRole);
-      setManagerServiceId(serviceId);
+      setRole(idTokenResult.claims.role || "director");
+      setManagerServiceId(idTokenResult.claims.serviceId || null);
 
       navigate("/dashboard");
 
@@ -173,6 +178,7 @@ function LoginPage() {
                 <input type="password" placeholder="Mot de passe" value={password} onChange={e => setPassword(e.target.value)} className="border p-3 rounded w-full shadow-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
               </div>
             )}
+
             {step === 2 && (
               <div className="space-y-4 w-80">
                 <div className="flex items-center space-x-2">
@@ -192,12 +198,33 @@ function LoginPage() {
               </div>
             )}
 
+            {step === 3 && (
+              <div className="space-y-4 w-80">
+                <h3 className="text-lg font-bold mb-2">Choisissez votre plan</h3>
+                <div className="flex flex-col space-y-2">
+                  {plans.map(plan => (
+                    <button
+                      key={plan.name}
+                      onClick={() => setSelectedPlan(plan)}
+                      className={`border p-3 rounded w-full text-left ${selectedPlan?.name === plan.name ? 'bg-indigo-600 text-white' : 'bg-white text-gray-800'}`}
+                    >
+                      {plan.name} - {plan.monthlyFee}€ / mois - {plan.includedQRCodes} QR codes inclus
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {error && <p className="text-red-500">{error}</p>}
 
-            <div className="flex justify-between w-80 mt-2">
+            {/* Navigation Step */}
+            <div className="flex justify-between w-80 mt-4">
               {step > 1 && <button onClick={handleBack} className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400 transition">← Retour</button>}
-              <button onClick={step < 2 ? handleNext : handleSubmit} className={`px-4 py-2 ${step < 2 ? "bg-indigo-600 hover:bg-indigo-700" : "bg-green-600 hover:bg-green-700"} text-white rounded transition`}>
-                {step < 2 ? "Suivant →" : "S'inscrire"}
+              <button
+                onClick={step < 3 ? handleNext : handleSubmit}
+                className={`px-4 py-2 ${step < 3 ? "bg-indigo-600 hover:bg-indigo-700" : "bg-green-600 hover:bg-green-700"} text-white rounded transition`}
+              >
+                {step < 3 ? "Suivant →" : "S'inscrire"}
               </button>
             </div>
           </>
