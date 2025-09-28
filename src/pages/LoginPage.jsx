@@ -1,8 +1,10 @@
+// src/pages/LoginPage.jsx
 import React, { useState, useEffect } from "react";
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendPasswordResetEmail
 } from "firebase/auth";
 import { auth, db } from "../firebase";
 import { useNavigate } from "react-router-dom";
@@ -10,13 +12,14 @@ import { FaHotel, FaUtensils, FaBuilding, FaMapMarkerAlt, FaPhone, FaSpa } from 
 import { doc, runTransaction } from "firebase/firestore";
 import TipBoxLogo from '../assets/TipBox.png';
 
-
 function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isRegister, setIsRegister] = useState(false);
   const [error, setError] = useState("");
   const navigate = useNavigate();
+  const [role, setRole] = useState(null);
+  const [managerServiceId, setManagerServiceId] = useState(null);
 
   // Infos entreprise
   const [hotelName, setHotelName] = useState("");
@@ -30,8 +33,15 @@ function LoginPage() {
 
   // Redirection si déjà connecté
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, user => {
-      if (user) navigate("/dashboard");
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        const idTokenResult = await user.getIdTokenResult();
+        const userRole = idTokenResult.claims.role || "director";
+        const serviceId = idTokenResult.claims.serviceId || null;
+        setRole(userRole);
+        setManagerServiceId(serviceId);
+        navigate("/dashboard");
+      }
     });
     return unsubscribe;
   }, [navigate]);
@@ -63,14 +73,15 @@ function LoginPage() {
 
   const handleBack = () => setStep(prev => prev - 1);
 
-
   const handleSubmit = async () => {
-    if (!(validateStep())) return;
+    if (!validateStep()) return;
 
     try {
+      let userCredential;
+
       if (isRegister) {
-        // Création du compte utilisateur
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        // Création compte directeur/hôtel
+        userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const userId = userCredential.user.uid;
 
         const siretRef = doc(db, "sirets", hotelSiret);
@@ -92,9 +103,30 @@ function LoginPage() {
         });
 
       } else {
-        // Connexion
-        await signInWithEmailAndPassword(auth, email, password);
+        // Connexion pour directeur, manager ou staff
+        try {
+          userCredential = await signInWithEmailAndPassword(auth, email, password);
+        } catch (err) {
+          if (err.code === "auth/wrong-password") {
+            alert("Mot de passe incorrect. Vous pouvez demander un réinitialisation si nécessaire.");
+          } else if (err.code === "auth/user-not-found") {
+            alert("Utilisateur non trouvé. Vérifiez l’email ou demandez au directeur un accès.");
+          } else {
+            console.error(err);
+            alert("Erreur de connexion");
+          }
+          return;
+        }
       }
+
+      // Récupérer les custom claims pour rôle et serviceId
+      const user = userCredential.user;
+      const idTokenResult = await user.getIdTokenResult();
+      const userRole = idTokenResult.claims.role || "director"; // par défaut director
+      const serviceId = idTokenResult.claims.serviceId || null;
+
+      setRole(userRole);
+      setManagerServiceId(serviceId);
 
       navigate("/dashboard");
 
@@ -114,15 +146,11 @@ function LoginPage() {
       {/* Branding */}
       <div className="md:w-1/2 bg-gradient-to-br from-blue-800 to-indigo-600 text-white flex flex-col justify-center items-center p-10 space-y-6">
         <div className="flex items-center space-x-3">
-          <img
-          src={TipBoxLogo}
-          alt="TipBox Logo"
-          className="h-20 w-20 rounded-full shadow-md"
-          />
+          <img src={TipBoxLogo} alt="TipBox Logo" className="h-20 w-20 rounded-full shadow-md" />
           <h1 className="text-5xl font-extrabold tracking-wide drop-shadow-lg">TipBox</h1>
         </div>
         <p className="text-xl font-semibold text-center max-w-xs">
-          La tirelire de vos équipiers
+          Facilitez les pourboires de vos clients.
         </p>
         <div className="flex space-x-4 mt-6">
           <FaHotel size={40} className="opacity-80" />
@@ -130,6 +158,7 @@ function LoginPage() {
           <FaSpa size={40} className="opacity-80" />
         </div>
       </div>
+
       {/* Login / Register */}
       <div className="md:w-1/2 flex flex-col justify-center items-center bg-gray-100 p-10 space-y-6">
         <h2 className="text-3xl font-bold text-gray-800">

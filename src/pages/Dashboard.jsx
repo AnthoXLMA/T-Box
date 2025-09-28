@@ -1,12 +1,13 @@
 // src/pages/Dashboard.jsx
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { auth, signOut, onAuthStateChanged } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import ModalQRCode from "../components/ModalQRCode";
 import { motion } from "framer-motion";
 import { FaEnvelope, FaSms, FaPrint } from "react-icons/fa";
-import QRCode from "react-qr-code";
 import QRCodeLib from "qrcode";
+import ServiceAccessModal from "../components/ServiceAccessModal";
+import { fetchServices } from "../firebase"; // adapter le chemin
 
 
 function Dashboard() {
@@ -14,45 +15,82 @@ function Dashboard() {
   const [tips, setTips] = useState([]);
   const [uid, setUid] = useState(null);
   const [selectedService, setSelectedService] = useState(null);
+  const [accessModal, setAccessModal] = useState({ open: false, service: null });
+  const [role, setRole] = useState(null);
+  const [managerServiceId, setManagerServiceId] = useState(null);
   const [loadingTips, setLoadingTips] = useState(true);
+
+  // --- Formulaire création utilisateur ---
+  const [newUser, setNewUser] = useState({ firstName: "", lastName: "", email: "", role: "manager" });
+  const [creatingUser, setCreatingUser] = useState(false);
+
+  // --- Modal envoi QR ---
   const [sendModal, setSendModal] = useState({ open: false, type: "", service: null });
   const [contactInfo, setContactInfo] = useState("");
   const [sending, setSending] = useState(false);
-  const qrRef = useRef(null);
+
   const navigate = useNavigate();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, user => {
-      if (user) {
-        setUid(user.uid);
-        setServices([
-          { id: "1", name: "Staff", uid: user.uid },
-          { id: "2", name: "Bar", uid: user.uid },
-          { id: "3", name: "Spa", uid: user.uid },
-          { id: "4", name: "Housekeeping", uid: user.uid },
-          { id: "5", name: "Réception", uid: user.uid },
-          { id: "6", name: "Restaurant", uid: user.uid },
-          { id: "7", name: "Commercial", uid: user.uid },
-        ]);
+  const unsubscribe = onAuthStateChanged(auth, async user => {
+    if (user) {
+      const idTokenResult = await user.getIdTokenResult();
+      const userRole = idTokenResult.claims.role || "director";
+      const serviceId = idTokenResult.claims.serviceId || null;
 
-        fetch(`http://localhost:4242/tips?uid=${user.uid}`)
-          .then(res => res.json())
-          .then(data => {
-            setTips(data);
-            setLoadingTips(false);
-          });
-      } else {
-        navigate("/login");
-      }
-    });
+      setUid(user.uid);
+      setRole(userRole);
+      setManagerServiceId(serviceId);
 
-    return () => unsubscribe();
-  }, [navigate]);
+      // ⬇️ Remplace ici par un fetch Firestore
+      const allServices = await fetchServices();
+
+      setServices(
+        userRole === "manager" && serviceId
+          ? allServices.filter(s => s.id === serviceId)
+          : allServices
+      );
+
+      setLoadingTips(false);
+    } else {
+      navigate("/login");
+    }
+  });
+
+  return () => unsubscribe();
+}, [navigate]);
 
   const handleLogout = async () => {
     await signOut(auth);
     navigate("/login");
   };
+
+  const handleCreateUser = async () => {
+    const { firstName, lastName, email, role: userRole } = newUser;
+    if (!firstName || !lastName || !email) return alert("Veuillez compléter tous les champs");
+
+    setCreatingUser(true);
+    try {
+      const res = await fetch("http://localhost:4242/create-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName, lastName, email, role: userRole, hotelUid: uid, serviceIds: services.map(s => s.id) }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || "Erreur création utilisateur");
+
+      if (!data.isNewUser) return alert("Cet utilisateur existe déjà !");
+
+      alert("Utilisateur créé avec succès et email envoyé !");
+      setNewUser({ firstName: "", lastName: "", email: "", role: "manager" });
+    } catch (err) {
+      console.error(err);
+      alert("Impossible de créer l'utilisateur");
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
 
   const totalTips = tips.reduce((sum, t) => sum + t.amount, 0) / 100;
   const avgTip = tips.length ? (totalTips / tips.length).toFixed(2) : 0;
@@ -87,26 +125,22 @@ function Dashboard() {
   };
 
   const handlePrint = async (service) => {
-  const value = `${window.location.origin}?service=${service.name}&uid=${uid}`;
-  try {
-    // Génération du QR code SVG
-    const svgString = await QRCodeLib.toString(value, { type: "svg", width: 300 });
-
-    // Ouvre nouvelle fenêtre pour impression
-    const printWindow = window.open("", "_blank");
-    printWindow.document.write("<html><head><title>QR Code</title></head><body>");
-    printWindow.document.write(`<h3 style="text-align:center;">${service.name}</h3>`);
-    printWindow.document.write(`<div style="text-align:center;margin-top:20px;">${svgString}</div>`);
-    printWindow.document.write("</body></html>");
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-  } catch (err) {
-    console.error("Erreur génération QR code imprimable", err);
-    alert("Impossible de générer le QR code pour impression");
-  }
-};
-
+    const value = `${window.location.origin}?service=${service.name}&uid=${uid}`;
+    try {
+      const svgString = await QRCodeLib.toString(value, { type: "svg", width: 300 });
+      const printWindow = window.open("", "_blank");
+      printWindow.document.write("<html><head><title>QR Code</title></head><body>");
+      printWindow.document.write(`<h3 style="text-align:center;">${service.name}</h3>`);
+      printWindow.document.write(`<div style="text-align:center;margin-top:20px;">${svgString}</div>`);
+      printWindow.document.write("</body></html>");
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (err) {
+      console.error("Erreur génération QR code imprimable", err);
+      alert("Impossible de générer le QR code pour impression");
+    }
+  };
 
   if (!uid || loadingTips)
     return <div className="flex justify-center items-center h-screen">Chargement...</div>;
@@ -138,59 +172,98 @@ function Dashboard() {
         </div>
       </motion.div>
 
+      {/* Création utilisateur (Directeur uniquement) */}
+      {role === "director" && (
+        <div className="bg-white p-6 rounded-xl shadow-lg space-y-4">
+          <h2 className="text-xl font-bold">Ajouter un manager</h2>
+          <input
+            type="text"
+            placeholder="Prénom"
+            value={newUser.firstName}
+            onChange={e => setNewUser({...newUser, firstName: e.target.value})}
+            className="w-full border p-2 rounded"
+          />
+          <input
+            type="text"
+            placeholder="Nom"
+            value={newUser.lastName}
+            onChange={e => setNewUser({...newUser, lastName: e.target.value})}
+            className="w-full border p-2 rounded"
+          />
+          <input
+            type="email"
+            placeholder="Email"
+            value={newUser.email}
+            onChange={e => setNewUser({...newUser, email: e.target.value})}
+            className="w-full border p-2 rounded"
+          />
+          <select
+            value={newUser.role}
+            onChange={e => setNewUser({...newUser, role: e.target.value})}
+            className="w-full border p-2 rounded"
+          >
+            <option value="manager">Manager</option>
+            <option value="staff">Staff</option>
+            <option value="viewer">Viewer</option>
+          </select>
+          <button
+            onClick={handleCreateUser}
+            disabled={creatingUser}
+            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700"
+          >
+            {creatingUser ? "Création..." : "Créer"}
+          </button>
+        </div>
+      )}
+
       {/* Services */}
       <h2 className="text-2xl font-bold text-gray-800 mb-4 mt-8">Services</h2>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.6 }}
-        className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6"
-      >
-        {services.map(service => (
+      <motion.div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
+        {services.map((service) => (
           <motion.div
             key={service.id}
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
-            className="bg-white rounded-xl shadow-lg p-6 flex flex-col justify-between transition-transform duration-200"
+            className="bg-white rounded-xl shadow-lg p-6 flex flex-col justify-between"
           >
             <h3 className="text-lg font-semibold mb-4">{service.name}</h3>
             <div className="flex flex-col space-y-2">
               <button
                 onClick={() => setSelectedService(service)}
-                className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-500 transition"
+                className="px-4 py-2 rounded-xl bg-indigo-600 text-white font-semibold hover:bg-indigo-500"
               >
                 📱 Afficher QR code
               </button>
               <button
                 onClick={() => setSendModal({ open: true, type: "email", service })}
-                className="px-4 py-2 rounded-xl bg-blue-500 text-white font-semibold hover:bg-blue-400 transition flex items-center justify-center space-x-2"
+                className="px-4 py-2 rounded-xl bg-blue-500 text-white font-semibold hover:bg-blue-400 flex items-center justify-center space-x-2"
               >
                 <FaEnvelope /> <span>Email</span>
               </button>
               <button
                 onClick={() => setSendModal({ open: true, type: "sms", service })}
-                className="px-4 py-2 rounded-xl bg-green-500 text-white font-semibold hover:bg-green-400 transition flex items-center justify-center space-x-2"
+                className="px-4 py-2 rounded-xl bg-green-500 text-white font-semibold hover:bg-green-400 flex items-center justify-center space-x-2"
               >
                 <FaSms /> <span>SMS</span>
               </button>
               <button
                 onClick={() => handlePrint(service)}
-                className="px-4 py-2 rounded-xl bg-yellow-500 text-white font-semibold hover:bg-yellow-400 transition flex items-center justify-center space-x-2"
+                className="px-4 py-2 rounded-xl bg-yellow-500 text-white font-semibold hover:bg-yellow-400 flex items-center justify-center space-x-2"
               >
                 <FaPrint /> <span>Imprimer</span>
               </button>
+              {role === "director" && (
+                <button
+                  onClick={() => setAccessModal({ open: true, service })}
+                  className="px-4 py-2 rounded-xl bg-purple-600 text-white font-semibold hover:bg-purple-500 flex items-center justify-center space-x-2"
+                >
+                  🔑 <span>Gérer accès</span>
+                </button>
+              )}
             </div>
           </motion.div>
         ))}
       </motion.div>
-
-      {/* Modal QRCode */}
-      <ModalQRCode
-        isOpen={!!selectedService}
-        onClose={() => setSelectedService(null)}
-        value={qrValue}
-        serviceName={selectedService?.name}
-      />
 
       {/* Modal Envoi Email/SMS */}
       {sendModal.open && (
@@ -223,6 +296,23 @@ function Dashboard() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Modal QRCode */}
+      <ModalQRCode
+        isOpen={!!selectedService}
+        onClose={() => setSelectedService(null)}
+        value={qrValue}
+        serviceName={selectedService?.name}
+      />
+
+      {/* Modal Gestion des accès */}
+      {accessModal.open && (
+        <ServiceAccessModal
+          service={accessModal.service}
+          onClose={() => setAccessModal({ open: false, service: null })}
+          uid={uid}
+        />
       )}
     </div>
   );

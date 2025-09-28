@@ -7,7 +7,7 @@ import {
   onAuthStateChanged,
   createUserWithEmailAndPassword
 } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, collection, getDocs } from "firebase/firestore";
 
 
 // Your web app's Firebase configuration
@@ -20,6 +20,10 @@ const firebaseConfig = {
   appId: "1:586501497047:web:8d67408a7ec21907969092"
 };
 
+export const fetchServices = async () => {
+  const snapshot = await getDocs(collection(db, "services"));
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
