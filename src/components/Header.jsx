@@ -7,22 +7,30 @@ import {
 import ModalStats from "./ModalStats";
 import AccountModal from "./AccountModal";
 import { onAuthStateChanged, getIdTokenResult } from "firebase/auth";
-import { auth } from "../firebase";
+import { auth, db } from "../firebase";
+import { doc, getDoc } from "firebase/firestore";
 import TipBoxLogo from '../assets/TipBox.png';
 
 export default function Header({ user, onLogout, stats }) {
   const [showStats, setShowStats] = useState(false);
   const [showAccount, setShowAccount] = useState(false);
   const [userRole, setUserRole] = useState(null);
+  const [companyData, setCompanyData] = useState(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+        // Récupérer les custom claims (pour employés)
         const token = await getIdTokenResult(user);
-        setUserRole(token.claims.role || "staff");
+        setUserRole(token.claims.role || null);
+
+        // Vérifier si l'utilisateur est directeur (document company)
+        const companyDoc = await getDoc(doc(db, "companies", user.uid));
+        setCompanyData(companyDoc.exists() ? companyDoc.data() : null);
       } else {
         setUserRole(null);
+        setCompanyData(null);
       }
     });
     return () => unsubscribe();
@@ -48,7 +56,8 @@ export default function Header({ user, onLogout, stats }) {
         {/* Navigation */}
         <nav className={`flex-col md:flex-row md:flex items-center w-full md:w-auto mt-4 md:mt-0
           ${mobileMenuOpen ? "flex" : "hidden md:flex"} space-y-2 md:space-y-0 md:space-x-6 text-lg font-medium`}>
-          {user ? (
+
+          {user && companyData ? (
             <>
               {/* Dashboard */}
               <Link
@@ -59,8 +68,8 @@ export default function Header({ user, onLogout, stats }) {
                 <FaTachometerAlt /> <span>Dashboard</span>
               </Link>
 
-              {/* Stats - uniquement managers */}
-              {userRole === "manager" && stats && (
+              {/* Stats */}
+              {stats && (
                 <button
                   onClick={() => setShowStats(true)}
                   className="flex items-center space-x-2 px-3 py-2 rounded bg-indigo-500 hover:bg-indigo-400 transition"
@@ -69,16 +78,14 @@ export default function Header({ user, onLogout, stats }) {
                 </button>
               )}
 
-              {/* Gestion du compte - uniquement directors */}
-              {userRole === "director" && (
-                <button
-                  onClick={() => setShowAccount(true)}
-                  className="flex items-center space-x-2 px-3 py-2 rounded bg-green-600 hover:bg-green-500 transition"
-                >
-                  <FaUserCircle className="text-xl" />
-                  <span>Gestion du compte</span>
-                </button>
-              )}
+              {/* Gestion du compte */}
+              <button
+                onClick={() => setShowAccount(true)}
+                className="flex items-center space-x-2 px-3 py-2 rounded bg-green-600 hover:bg-green-500 transition"
+              >
+                <FaUserCircle className="text-xl" />
+                <span>Gestion du compte</span>
+              </button>
 
               {/* Email affiché */}
               <div className="flex items-center space-x-2 bg-white bg-opacity-20 px-3 py-2 rounded backdrop-blur-md">
@@ -105,8 +112,8 @@ export default function Header({ user, onLogout, stats }) {
         </nav>
       </div>
 
-      {/* Modal Stats pour managers */}
-      {userRole === "director" && stats && (
+      {/* Modal Stats */}
+      {companyData && stats && (
         <ModalStats
           isOpen={showStats}
           onClose={() => setShowStats(false)}
@@ -116,8 +123,8 @@ export default function Header({ user, onLogout, stats }) {
         />
       )}
 
-      {/* Modal Gestion du compte pour directors */}
-      {userRole === "director" && user && (
+      {/* Modal Gestion du compte */}
+      {companyData && user && (
         <AccountModal
           isOpen={showAccount}
           onClose={() => setShowAccount(false)}
