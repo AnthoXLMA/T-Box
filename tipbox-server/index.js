@@ -11,3 +11,4 @@ const app = createApp({ stripeKey, emailUser, emailPass });
 
 // Déployer l’API
 export const api = functions.https.onRequest(app);
+

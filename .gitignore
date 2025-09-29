@@ -36,7 +36,8 @@ build/
 !/yarn.lock
 !/vite.config.js
 !/README.md
-!/tipbox-server/**
+
 
 # Ignorer les fichiers sensibles spécifiques
 tipbox-server/serviceAccountKey.json
+/tipbox-server/**
