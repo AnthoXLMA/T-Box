@@ -1,0 +1,42 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Node modules
+node_modules/
+
+# Build et Vite
+dist/
+dist-ssr/
+build/
+*.local
+.env
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Inclure uniquement les dossiers et fichiers essentiels
+!/src/
+!/public/
+!/package.json
+!/package-lock.json
+!/yarn.lock
+!/vite.config.js
+!/README.md
+!/tipbox-server/**
+
+# Ignorer les fichiers sensibles spécifiques
+tipbox-server/serviceAccountKey.json
