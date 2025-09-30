@@ -9,15 +9,21 @@ lerna-debug.log*
 
 # Node modules
 node_modules/
+functions/node_modules/
 
-# Build et Vite
+# Build outputs
 dist/
 dist-ssr/
 build/
+.cache/
 *.local
-.env
 
-# Editor
+# Firebase / Emulators
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
+
+# IDE / OS files
 .vscode/*
 !.vscode/extensions.json
 .idea/
@@ -28,16 +34,22 @@ build/
 *.sln
 *.sw?
 
-# Inclure uniquement les dossiers et fichiers essentiels
+# Env files (clés sensibles)
+.env
+.env.local
+functions/.env
+functions/.env.local
+
+# Répertoires lourds ou sensibles
+tipbox-server/
+
+# Inclure uniquement les fichiers importants du projet
 !/src/
 !/public/
+!/functions/
 !/package.json
 !/package-lock.json
 !/yarn.lock
 !/vite.config.js
+!/firebase.json
 !/README.md
-
-
-# Ignorer les fichiers sensibles spécifiques
-tipbox-server/serviceAccountKey.json
-/tipbox-server/**
