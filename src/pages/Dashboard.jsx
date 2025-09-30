@@ -3,13 +3,18 @@ import React, { useEffect, useState } from "react";
 import { auth, signOut, onAuthStateChanged } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import ModalQRCode from "../components/ModalQRCode";
+import ServiceAccessModal from "../components/ServiceAccessModal";
 import { motion } from "framer-motion";
 import { FaEnvelope, FaSms, FaPrint } from "react-icons/fa";
 import QRCodeLib from "qrcode";
-import ServiceAccessModal from "../components/ServiceAccessModal";
 import { fetchServices } from "../firebase"; // adapter le chemin
 import tipboxLogo from "../assets/TipBox.png";
 
+// --- API URL dynamique ---
+const API_URL =
+  window.location.hostname === "localhost"
+    ? "http://localhost:4242"
+    : "https://us-central1-tipbox-a4f99.cloudfunctions.net/apiV2";
 
 function Dashboard() {
   const [services, setServices] = useState([]);
@@ -21,60 +26,56 @@ function Dashboard() {
   const [managerServiceId, setManagerServiceId] = useState(null);
   const [loadingTips, setLoadingTips] = useState(true);
 
-  // --- Formulaire création utilisateur ---
   const [newUser, setNewUser] = useState({ firstName: "", lastName: "", email: "", role: "manager" });
   const [creatingUser, setCreatingUser] = useState(false);
 
-  // --- Modal envoi QR ---
   const [sendModal, setSendModal] = useState({ open: false, type: "", service: null });
   const [contactInfo, setContactInfo] = useState("");
   const [sending, setSending] = useState(false);
 
   const navigate = useNavigate();
 
+  // --- Auth & récupération services ---
   useEffect(() => {
-  const unsubscribe = onAuthStateChanged(auth, async user => {
-    if (user) {
-      const idTokenResult = await user.getIdTokenResult();
-      const userRole = idTokenResult.claims.role || "director";
-      const serviceId = idTokenResult.claims.serviceId || null;
+    const unsubscribe = onAuthStateChanged(auth, async user => {
+      if (user) {
+        const idTokenResult = await user.getIdTokenResult();
+        const userRole = idTokenResult.claims.role || "director";
+        const serviceId = idTokenResult.claims.serviceId || null;
 
-      setUid(user.uid);
-      setRole(userRole);
-      setManagerServiceId(serviceId);
+        setUid(user.uid);
+        setRole(userRole);
+        setManagerServiceId(serviceId);
 
-      // ⬇️ Remplace ici par un fetch Firestore
-      const allServices = await fetchServices();
+        const allServices = await fetchServices();
+        setServices(
+          userRole === "manager" && serviceId
+            ? allServices.filter(s => s.id === serviceId)
+            : allServices
+        );
+        setLoadingTips(false);
+      } else {
+        navigate("/login");
+      }
+    });
 
-      setServices(
-        userRole === "manager" && serviceId
-          ? allServices.filter(s => s.id === serviceId)
-          : allServices
-      );
+    return () => unsubscribe();
+  }, [navigate]);
 
-      setLoadingTips(false);
-    } else {
-      navigate("/login");
-    }
-  });
-
-  return () => unsubscribe();
-}, [navigate]);
-
+  // --- Logout ---
   const handleLogout = async () => {
     await signOut(auth);
     navigate("/login");
   };
 
+  // --- Création utilisateur ---
   const handleCreateUser = async () => {
     const { firstName, lastName, email, role: userRole } = newUser;
     if (!firstName || !lastName || !email) return alert("Veuillez compléter tous les champs");
 
     setCreatingUser(true);
-
     try {
-      // Appel backend pour créer l'utilisateur et envoyer email
-      const res = await fetch("http://localhost:4242/create-user", {
+      const res = await fetch(`${API_URL}/create-user`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -88,7 +89,6 @@ function Dashboard() {
       });
 
       const data = await res.json();
-
       if (!res.ok || !data.success) throw new Error(data.error || "Erreur création utilisateur");
 
       if (!data.isNewUser) {
@@ -106,19 +106,12 @@ function Dashboard() {
     }
   };
 
-  const totalTips = tips.reduce((sum, t) => sum + t.amount, 0) / 100;
-  const avgTip = tips.length ? (totalTips / tips.length).toFixed(2) : 0;
-
-  const qrValue = selectedService
-    ? `${window.location.origin}/tip?service=${selectedService.name}&uid=${uid}`
-    // ? `${window.location.origin}?service=${selectedService.name}&uid=${uid}`
-    : "";
-
+  // --- Envoi QR (email/SMS) ---
   const handleSend = async () => {
     if (!contactInfo) return alert("Veuillez saisir un email ou numéro valide");
     setSending(true);
     try {
-      await fetch("http://localhost:4242/send-qr", {
+      await fetch(`${API_URL}/send-qr`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -139,114 +132,63 @@ function Dashboard() {
     }
   };
 
+  // --- Impression QR ---
   const handlePrint = async (service) => {
-  // const value = `${window.location.origin}?service=${service.name}&uid=${uid}`;
-  const value = `${window.location.origin}/tip?service=${service.name}&uid=${uid}`;
+    const value = `${window.location.origin}/tip?service=${service.name}&uid=${uid}`;
+    try {
+      const svgString = await QRCodeLib.toString(value, { type: "svg", width: 300 });
+      const printWindow = window.open("", "_blank");
 
-  try {
-    const svgString = await QRCodeLib.toString(value, { type: "svg", width: 300 });
-    const printWindow = window.open("", "_blank");
+      printWindow.document.write(`
+        <html>
+          <head>
+            <title>QR Code ${service.name}</title>
+            <style>
+              body { font-family: Arial; text-align: center; margin: 0; padding: 40px; background: #fff; }
+              .qr-container { margin-top: 20px; }
+            </style>
+          </head>
+          <body>
+            <img src="${tipboxLogo}" alt="Tipbox Logo" style="width:120px; display:block; margin:0 auto;" />
+            <div class="qr-container">
+              ${svgString.replace('<svg ', '<svg style="width:200px; height:auto;" ')}
+            </div>
+            <p style="font-size:14px; color:#555; margin:5px 0 10px 0;">Scannez ce QR code pour accéder à votre service Tipbox</p>
+            <h2 style="font-size:12px; font-weight:normal; color:#999; margin:0;">${service.name}</h2>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+    } catch (err) {
+      console.error("Erreur génération QR code imprimable", err);
+      alert("Impossible de générer le QR code pour impression");
+    }
+  };
 
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>QR Code ${service.name}</title>
-          <style>
-            body {
-              font-family: Arial, sans-serif;
-              text-align: center;
-              margin: 0;
-              padding: 40px;
-              background: #fff;
-            }
-            .logo {
-              width: 150px;
-              margin-bottom: 20px;
-            }
-            h3 {
-              margin-bottom: 30px;
-            }
-            .qr-container {
-              margin-top: 20px;
-            }
-          </style>
-        </head>
-<body>
-  <div style="
-    font-family: 'Arial', sans-serif;
-    text-align: center;
-    margin: 0;
-    padding: 20px;
-    background: #fff;
-    width: 300px; /* largeur approximative du petit support */
-    box-sizing: border-box;
-  ">
-    <!-- Logo Tipbox -->
-    <div style="margin-bottom: 15px;">
-      <img src="${tipboxLogo}" alt="Tipbox Logo" style="
-        width: 120px;
-        display: block;
-        margin: 0 auto;
-      " />
-    </div>
+  // --- Calcul statistiques ---
+  const totalTips = tips.reduce((sum, t) => sum + t.amount, 0) / 100;
+  const avgTip = tips.length ? (totalTips / tips.length).toFixed(2) : 0;
 
-    <!-- QR Code avec encadré et ombre -->
-    <div style="
-      display: block;
-      width: 200px;
-      padding: 10px;
-      border: 2px solid #f0f0f0;
-      border-radius: 12px;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.1);
-      background: #fff;
-      margin: 15px auto;
-    ">
-      <div style="width:100%; height:auto;">
-        ${svgString.replace('<svg ', '<svg style="width:100%; height:auto;" ')}
-      </div>
-    </div>
-
-    <!-- Slogan / Call to action -->
-    <p style="
-      font-size: 14px;
-      color: #555;
-      margin: 5px 0 10px 0;
-    ">
-      Scannez ce QR code pour accéder à votre service Tipbox
-    </p>
-
-    <!-- Nom du service discret en bas -->
-    <h2 style="
-      font-size: 12px;
-      font-weight: normal;
-      color: #999;
-      margin: 0;
-    ">${service.name}</h2>
-  </div>
-</body>
-
-
-
-      </html>
-    `);
-
-    printWindow.document.close();
-    printWindow.focus();
-    printWindow.print();
-  } catch (err) {
-    console.error("Erreur génération QR code imprimable", err);
-    alert("Impossible de générer le QR code pour impression");
-  }
-};
-
+  const qrValue = selectedService
+    ? `${window.location.origin}/tip?service=${selectedService.name}&uid=${uid}`
+    : "";
 
   if (!uid || loadingTips)
     return <div className="flex justify-center items-center h-screen">Chargement...</div>;
 
   return (
     <div className="p-6 md:p-10 space-y-8 bg-gray-50 min-h-screen">
+      {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-extrabold text-gray-800 drop-shadow">Dashboard</h1>
+        {/*<button
+          onClick={handleLogout}
+          className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+        >
+          Déconnexion
+        </button>*/}
       </div>
 
       {/* Statistiques */}
@@ -270,7 +212,7 @@ function Dashboard() {
         </div>
       </motion.div>
 
-      {/* Création utilisateur (Directeur uniquement) */}
+      {/* Création utilisateur */}
       {role === "director" && (
         <div className="bg-white p-6 rounded-xl shadow-lg space-y-4">
           <h2 className="text-xl font-bold">Ajouter un manager</h2>
@@ -278,26 +220,26 @@ function Dashboard() {
             type="text"
             placeholder="Prénom"
             value={newUser.firstName}
-            onChange={e => setNewUser({...newUser, firstName: e.target.value})}
+            onChange={e => setNewUser({ ...newUser, firstName: e.target.value })}
             className="w-full border p-2 rounded"
           />
           <input
             type="text"
             placeholder="Nom"
             value={newUser.lastName}
-            onChange={e => setNewUser({...newUser, lastName: e.target.value})}
+            onChange={e => setNewUser({ ...newUser, lastName: e.target.value })}
             className="w-full border p-2 rounded"
           />
           <input
             type="email"
             placeholder="Email"
             value={newUser.email}
-            onChange={e => setNewUser({...newUser, email: e.target.value})}
+            onChange={e => setNewUser({ ...newUser, email: e.target.value })}
             className="w-full border p-2 rounded"
           />
           <select
             value={newUser.role}
-            onChange={e => setNewUser({...newUser, role: e.target.value})}
+            onChange={e => setNewUser({ ...newUser, role: e.target.value })}
             className="w-full border p-2 rounded"
           >
             <option value="manager">Manager</option>
@@ -317,7 +259,7 @@ function Dashboard() {
       {/* Services */}
       <h2 className="text-2xl font-bold text-gray-800 mb-4 mt-8">Services</h2>
       <motion.div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-        {services.map((service) => (
+        {services.map(service => (
           <motion.div
             key={service.id}
             whileHover={{ scale: 1.03 }}
@@ -363,7 +305,7 @@ function Dashboard() {
         ))}
       </motion.div>
 
-      {/* Modal Envoi Email/SMS */}
+      {/* Modal Envoi QR */}
       {sendModal.open && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50">
           <div className="bg-white p-6 rounded-xl shadow-xl w-80 space-y-4">
