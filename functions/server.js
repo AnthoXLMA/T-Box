@@ -135,7 +135,6 @@ export function createApp({ stripeKey, emailUser, emailPass }) {
   }
 
 // --- Routes utilisateurs ---
-// Récupérer tous les utilisateurs d’un hôtel
 app.get("/users", verifyToken, async (req, res) => {
   const { hotelUid } = req.query;
   if (!hotelUid) return res.status(400).json({ error: "hotelUid manquant" });
@@ -152,6 +151,7 @@ app.get("/users", verifyToken, async (req, res) => {
 
 // Créer ou mettre à jour un utilisateur
 app.post("/create-user", verifyToken, async (req, res) => {
+  console.log("Body reçu:", req.body);
   const { email, firstName, lastName, role, hotelUid, serviceIds = [] } = req.body;
   if (!email || !role || !hotelUid) return res.status(400).json({ error: "Champs manquants" });
 
@@ -308,39 +308,38 @@ app.post("/lock-service-user", verifyToken, async (req, res) => {
     }
   });
 
-app.post("/tip-qr", async (req, res) => {
-  const { service, uid, amount, message } = req.body;
-  if (!service || !uid || !amount) return res.status(400).json({ error: "Paramètres manquants" });
+  app.post("/tip-qr", async (req, res) => {
+    const { service, uid, amount, message } = req.body;
+    if (!service || !uid || !amount) return res.status(400).json({ error: "Paramètres manquants" });
 
-  const unitAmount = Math.round(Number(amount));
-  if (isNaN(unitAmount) || unitAmount < 50) return res.status(400).json({ error: "Montant invalide" });
+    const unitAmount = Math.round(Number(amount));
+    if (isNaN(unitAmount) || unitAmount < 50) return res.status(400).json({ error: "Montant invalide" });
 
-  if (!stripe) return res.status(500).json({ error: "Stripe non configuré !" });
+    if (!stripe) return res.status(500).json({ error: "Stripe non configuré !" });
 
-  try {
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      line_items: [{
-        price_data: {
-          currency: "eur",
-          product_data: { name: `Pourboire - ${service}`, description: message || "" },
-          unit_amount: unitAmount
-        },
-        quantity: 1
-      }],
-      mode: "payment",
-      success_url: `${FRONTEND_URL}/tip-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${FRONTEND_URL}/tip-cancel`,
-    });
+    try {
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        line_items: [{
+          price_data: {
+            currency: "eur",
+            product_data: { name: `Pourboire - ${service}`, description: message || "" },
+            unit_amount: unitAmount
+          },
+          quantity: 1
+        }],
+        mode: "payment",
+        success_url: `${FRONTEND_URL}/tip-success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${FRONTEND_URL}/tip-cancel`,
+      });
 
-    res.json({ url: session.url }); // renvoyer l'URL au lieu de redirection directe
+      res.json({ url: session.url }); // renvoyer l'URL au lieu de redirection directe
 
-  } catch (err) {
-    console.error("Erreur Stripe tip-qr:", err);
-    res.status(500).json({ error: "Erreur serveur Stripe" });
-  }
-});
-
+    } catch (err) {
+      console.error("Erreur Stripe tip-qr:", err);
+      res.status(500).json({ error: "Erreur serveur Stripe" });
+    }
+  });
 
   // --- Stripe Checkout ---
   app.post("/create-checkout-session", async (req, res) => {
