@@ -9,6 +9,8 @@ import { FaEnvelope, FaSms, FaPrint } from "react-icons/fa";
 import QRCodeLib from "qrcode";
 import { fetchServices } from "../firebase"; // adapter le chemin
 import tipboxLogo from "../assets/TipBox.png";
+import axios from "axios";
+import StaffTable from "../components/StaffTable"
 
 // --- API URL dynamique ---
 const API_URL =
@@ -25,6 +27,9 @@ function Dashboard() {
   const [role, setRole] = useState(null);
   const [managerServiceId, setManagerServiceId] = useState(null);
   const [loadingTips, setLoadingTips] = useState(true);
+
+
+  const [users, setUsers] = useState([]);
 
   const [newUser, setNewUser] = useState({ firstName: "", lastName: "", email: "", role: "manager" });
   const [creatingUser, setCreatingUser] = useState(false);
@@ -68,43 +73,94 @@ function Dashboard() {
     navigate("/login");
   };
 
-  // --- Création utilisateur ---
-  const handleCreateUser = async () => {
-    const { firstName, lastName, email, role: userRole } = newUser;
-    if (!firstName || !lastName || !email) return alert("Veuillez compléter tous les champs");
 
-    setCreatingUser(true);
+  // --- Récupération utilisateurs ---
+  const fetchUsers = async () => {
     try {
-      const res = await fetch(`${API_URL}/create-user`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          firstName,
-          lastName,
-          email,
-          role: userRole,
-          hotelUid: uid,
-          serviceIds: services.map(s => s.id),
-        }),
+      const idToken = await auth.currentUser.getIdToken();
+      const idTokenResult = await auth.currentUser.getIdTokenResult();
+      const hotelUid = idTokenResult.claims.hotelUid;
+
+      const res = await axios.get(`${API_URL}/users`, {
+        headers: { "Authorization": `Bearer ${idToken}` },
+        params: { hotelUid: uid }
       });
-
-      const data = await res.json();
-      if (!res.ok || !data.success) throw new Error(data.error || "Erreur création utilisateur");
-
-      if (!data.isNewUser) {
-        alert("Cet utilisateur existe déjà !");
-        return;
-      }
-
-      alert("Utilisateur créé avec succès et email envoyé !");
-      setNewUser({ firstName: "", lastName: "", email: "", role: "manager" });
+      setUsers(res.data || []);
     } catch (err) {
-      console.error(err);
-      alert("Impossible de créer l'utilisateur : " + err.message);
-    } finally {
-      setCreatingUser(false);
+      console.error("Erreur récupération utilisateurs", err);
     }
   };
+
+  // --- UseEffect pour charger utilisateurs après login ---
+  useEffect(() => {
+    if (uid) fetchUsers();
+  }, [uid]);
+
+  // --- Création utilisateur ---
+const handleCreateUser = async () => {
+  const { firstName, lastName, email, role: userRole, serviceIds = [] } = newUser;
+  if (!firstName || !lastName || !email) return alert("Veuillez compléter tous les champs");
+
+  const hotelUid = auth.currentUser.uid;
+
+  console.log("Payload envoyé :", {
+    firstName,
+    lastName,
+    email,
+    role: userRole,
+    hotelUid,
+    serviceIds,
+  });
+
+  setCreatingUser(true);
+
+  try {
+    const idToken = await auth.currentUser.getIdToken();
+    // const idTokenResult = await auth.currentUser.getIdTokenResult();
+    // const hotelUid = idTokenResult.claims.hotelUid;
+
+    const res = await fetch(`${API_URL}/create-user`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${idToken}`
+      },
+      body: JSON.stringify({
+        firstName,
+        lastName,
+        email,
+        role: userRole,
+        hotelUid,
+        serviceIds,
+      }),
+    });
+
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || "Erreur création utilisateur");
+
+    if (!data.isNewUser) {
+      alert("Cet utilisateur existe déjà !");
+    } else {
+      alert("Utilisateur créé avec succès et email envoyé !");
+      setNewUser({ firstName: "", lastName: "", email: "", role: "manager" });
+    }
+
+    // Mise à jour de la liste des utilisateurs pour le modal
+    const usersRes = await fetch(`${API_URL}/users?hotelUid=${hotelUid}`, {
+      headers: { "Authorization": `Bearer ${idToken}` }
+    });
+    const updatedUsers = await usersRes.json();
+    setUsers(updatedUsers);
+
+  } catch (err) {
+    console.error(err);
+    alert("Impossible de créer l'utilisateur : " + err.message);
+  } finally {
+    setCreatingUser(false);
+  }
+};
+
+
 
   // --- Envoi QR (email/SMS) ---
   const handleSend = async () => {
@@ -167,6 +223,9 @@ function Dashboard() {
     }
   };
 
+  // const updatedUsers = await fetchUsers();
+  // setUsers(updatedUsers);
+
   // --- Calcul statistiques ---
   const totalTips = tips.reduce((sum, t) => sum + t.amount, 0) / 100;
   const avgTip = tips.length ? (totalTips / tips.length).toFixed(2) : 0;
@@ -216,6 +275,8 @@ function Dashboard() {
       {role === "director" && (
         <div className="bg-white p-6 rounded-xl shadow-lg space-y-4">
           <h2 className="text-xl font-bold">Ajouter un manager</h2>
+
+          {/* Infos utilisateur */}
           <input
             type="text"
             placeholder="Prénom"
@@ -246,6 +307,34 @@ function Dashboard() {
             <option value="staff">Staff</option>
             <option value="viewer">Viewer</option>
           </select>
+
+          {/* Sélection des services */}
+          <div className="border p-2 rounded">
+            <p className="font-semibold mb-2">Services accessibles</p>
+            <div className="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto">
+              {services.map(service => (
+                <label key={service.id} className="flex items-center space-x-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newUser.serviceIds?.includes(service.id) || false}
+                    onChange={e => {
+                      const checked = e.target.checked;
+                      setNewUser(prev => ({
+                        ...prev,
+                        serviceIds: checked
+                          ? [...(prev.serviceIds || []), service.id]
+                          : (prev.serviceIds || []).filter(id => id !== service.id),
+                      }));
+                    }}
+                    className="w-4 h-4 accent-indigo-600"
+                  />
+                  <span>{service.name}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Bouton de création */}
           <button
             onClick={handleCreateUser}
             disabled={creatingUser}
@@ -352,6 +441,7 @@ function Dashboard() {
           service={accessModal.service}
           onClose={() => setAccessModal({ open: false, service: null })}
           uid={uid}
+          users={users} // ← liste mise à jour
         />
       )}
     </div>
