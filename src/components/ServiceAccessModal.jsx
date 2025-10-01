@@ -8,11 +8,17 @@ function ServiceAccessModal({ service, onClose, uid }) {
   const [lockedServices, setLockedServices] = useState({});
   const [loading, setLoading] = useState(false);
 
+  // --- URL dynamique selon environnement ---
+  const API_URL =
+    window.location.hostname === "localhost"
+      ? "http://localhost:4242"
+      : "https://us-central1-tipbox-a4f99.cloudfunctions.net/apiV2";
+
   // --- Charger tous les utilisateurs ---
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const res = await axios.get("http://localhost:4242/users", { params: { hotelUid: uid } });
+        const res = await axios.get(`${API_URL}/users`, { params: { hotelUid: uid } });
         const usersData = res.data || [];
         setUsers(usersData);
 
@@ -30,20 +36,20 @@ function ServiceAccessModal({ service, onClose, uid }) {
       }
     };
     if (uid) fetchUsers();
-  }, [uid]);
+  }, [uid, API_URL]);
 
   // --- Charger tous les services ---
   useEffect(() => {
     const fetchServices = async () => {
       try {
-        const res = await axios.get("http://localhost:4242/services", { params: { uid } });
+        const res = await axios.get(`${API_URL}/services`, { params: { uid } });
         setAllServices(res.data || []);
       } catch (err) {
         console.error("Erreur récupération services", err);
       }
     };
     if (uid) fetchServices();
-  }, [uid]);
+  }, [uid, API_URL]);
 
   // --- Toggle accès utilisateur ---
   const toggleUserService = (userId, serviceId) => {
@@ -77,29 +83,30 @@ function ServiceAccessModal({ service, onClose, uid }) {
           const servicesToAssign = selectedUsers[userId] || [];
           const servicesToRemove = (user?.services || []).filter(s => !servicesToAssign.includes(String(s)));
 
+          // Attribution services
           await Promise.all(
             servicesToAssign.map(sId =>
-              axios.post("http://localhost:4242/update-user-services", { uid: userId, serviceId: sId, grantAccess: true })
+              axios.post(`${API_URL}/update-user-services`, { uid: userId, serviceId: sId, grantAccess: true })
             )
           );
 
+          // Retrait services
           await Promise.all(
             servicesToRemove.map(sId =>
-              axios.post("http://localhost:4242/update-user-services", { uid: userId, serviceId: sId, grantAccess: false })
+              axios.post(`${API_URL}/update-user-services`, { uid: userId, serviceId: sId, grantAccess: false })
             )
           );
-
 
           // Sauvegarde des verrouillages
           await Promise.all(
             (lockedServices[userId] || []).map(sId =>
-              axios.post("http://localhost:4242/lock-service-user", { uid: userId, serviceId: sId })
+              axios.post(`${API_URL}/lock-service-user`, { uid: userId, serviceId: sId })
             )
           );
         })
       );
       alert("Accès mis à jour !");
-      const res = await axios.get("http://localhost:4242/users", { params: { hotelUid: uid } });
+      const res = await axios.get(`${API_URL}/users`, { params: { hotelUid: uid } });
       setUsers(res.data || []);
     } catch (err) {
       console.error(err);
@@ -115,7 +122,9 @@ function ServiceAccessModal({ service, onClose, uid }) {
     try {
       const userServices = selectedUsers[userId] || [];
       await Promise.all(
-        userServices.map(sId => axios.post("http://localhost:4242/remove-service-user", { uid: userId, serviceId: sId }))
+        userServices.map(sId =>
+          axios.post(`${API_URL}/remove-service-user`, { uid: userId, serviceId: sId })
+        )
       );
       setUsers(prev => prev.filter(u => u.uid !== userId));
       setSelectedUsers(prev => {
@@ -144,19 +153,19 @@ function ServiceAccessModal({ service, onClose, uid }) {
           <h4 className="font-semibold">Utilisateurs existants</h4>
           {users.length === 0 && <p>Aucun utilisateur</p>}
           {users.map(u => (
-          <div key={u.uid} className="p-2 border rounded flex justify-between items-center">
-            <p>{u.email} - {u.role}</p>
-            <label className="flex items-center space-x-2 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={(selectedUsers[u.uid] || []).includes(service.id)}
-                onChange={() => toggleUserService(u.uid, service.id)}
-                className="w-4 h-4 accent-indigo-600"
-              />
-              <span>Accès</span>
-            </label>
-          </div>
-        ))}
+            <div key={u.uid} className="p-2 border rounded flex justify-between items-center">
+              <p>{u.email} - {u.role}</p>
+              <label className="flex items-center space-x-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={(selectedUsers[u.uid] || []).includes(service.id)}
+                  onChange={() => toggleUserService(u.uid, service.id)}
+                  className="w-4 h-4 accent-indigo-600"
+                />
+                <span>Accès</span>
+              </label>
+            </div>
+          ))}
         </div>
 
         {/* Footer */}
