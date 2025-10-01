@@ -37,16 +37,16 @@ firebase-debug.*.log
 # Env files (clés sensibles)
 .env
 .env.local
-functions/.env
-functions/.env.local
 
 # Répertoires lourds ou sensibles
 tipbox-server/
+/functions/
+functions/.env
+functions/.env.local
 
 # Inclure uniquement les fichiers importants du projet
 !/src/
 !/public/
-!/functions/
 !/package.json
 !/package-lock.json
 !/yarn.lock

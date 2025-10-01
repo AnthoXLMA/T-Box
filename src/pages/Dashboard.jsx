@@ -106,6 +106,7 @@ function Dashboard() {
     }
   };
 
+
   // --- Envoi QR (email/SMS) ---
   const handleSend = async () => {
     if (!contactInfo) return alert("Veuillez saisir un email ou numéro valide");
