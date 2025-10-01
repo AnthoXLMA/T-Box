@@ -4,6 +4,8 @@ import cors from "cors";
 import nodemailer from "nodemailer";
 import admin from "./firebaseAdmin.js";
 import "dotenv/config";
+import fetch from "node-fetch";
+
 
 export function createApp({ stripeKey, emailUser, emailPass }) {
   const app = express();
@@ -316,6 +318,64 @@ app.post("/lock-service-user", verifyToken, async (req, res) => {
       res.status(500).json({ error: err.message });
     }
   });
+
+  app.post("/send-qr", verifyToken, async (req, res) => {
+  const { service, uid, type, contact } = req.body;
+  if (!service || !uid || !contact) return res.status(400).json({ error: "Champs manquants" });
+
+  try {
+    // Ici tu peux utiliser Nodemailer pour envoyer l'email
+    await transporter.sendMail({
+      from: `"TipBox" <${emailUser}>`,
+      to: contact,
+      subject: `QR Code pour ${service}`,
+      text: `Voici votre QR code pour le service ${service} : ...`
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/send-sms", verifyToken, async (req, res) => {
+  const { service, uid, contact, message } = req.body;
+  if (!service || !uid || !contact) return res.status(400).json({ error: "Champs manquants" });
+
+  try {
+    if (!process.env.BREVO_API_KEY) {
+      throw new Error("Brevo non configuré");
+    }
+
+    // Envoi du SMS via Brevo
+    const response = await fetch("https://api.brevo.com/v3/sms/send", {
+      method: "POST",
+      headers: {
+        "accept": "application/json",
+        "api-key": process.env.BREVO_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        sender: "TipBox", // expéditeur validé
+        recipient: contact, // numéro du client en format international +33...
+        content: message || `Voici votre QR code pour ${service} : ...`,
+        type: "transactional"
+      }),
+    });
+
+    const data = await response.json();
+
+    if (data.messageId || data.success) {
+      res.json({ success: true, data });
+    } else {
+      throw new Error(`Erreur Brevo : ${JSON.stringify(data)}`);
+    }
+  } catch (err) {
+    console.error("Erreur envoi SMS :", err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
   app.post("/tip-qr", async (req, res) => {
     const { service, uid, amount, message } = req.body;
