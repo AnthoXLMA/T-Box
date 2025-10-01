@@ -452,7 +452,7 @@ const handleCreateUser = async () => {
           service={accessModal.service}
           onClose={() => setAccessModal({ open: false, service: null })}
           uid={uid}
-          users={users} // ← liste mise à jour
+          users={users}
           hotelUid={uid}
         />
       )}

@@ -223,8 +223,17 @@ app.post("/update-user-services", verifyToken, async (req, res) => {
       : currentServices.filter(s => String(s) !== String(serviceId));
 
     await admin.auth().setCustomUserClaims(uid, { ...user.customClaims, services: updatedServices });
-    await upsertUserDoc(user, { serviceIds: updatedServices });
-
+    // await upsertUserDoc(user, { serviceIds: updatedServices });
+    await upsertUserDoc(
+      { ...user, uid }, // garde l’uid
+      {
+        firstName: user.displayName?.split(" ")[0] || "",
+        lastName: user.displayName?.split(" ")[1] || "",
+        role: user.customClaims?.role || null,
+        hotelUid: user.customClaims?.hotelUid || null,
+        serviceIds: updatedServices
+      }
+    );
     res.json({ success: true });
   } catch (err) {
     console.error("Erreur update-user-services:", err);
