@@ -22,6 +22,7 @@ function ServiceAccessModal({ service, onClose, hotelUid }) {
           params: { hotelUid },
         });
         const usersData = res.data || [];
+        console.log("Utilisateurs récupérés:", usersData);
 
         setUsers(usersData);
 
