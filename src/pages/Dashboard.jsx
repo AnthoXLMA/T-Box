@@ -80,10 +80,13 @@ function Dashboard() {
       const idToken = await auth.currentUser.getIdToken();
       const idTokenResult = await auth.currentUser.getIdTokenResult();
       const hotelUid = idTokenResult.claims.hotelUid;
+      // const hotelUidFromClaims = idTokenResult.claims.hotelUid;
+
 
       const res = await axios.get(`${API_URL}/users`, {
         headers: { "Authorization": `Bearer ${idToken}` },
         params: { hotelUid: uid }
+        // params: { hotelUid: hotelUidFromClaims }
       });
       setUsers(res.data || []);
     } catch (err) {
@@ -344,7 +347,15 @@ const handleCreateUser = async () => {
           </button>
         </div>
       )}
-
+      {/*<div>
+        <h1 className="text-2xl font-bold mb-4">Mon Staff</h1>
+        {hotelUid && (
+          <StaffTable
+            users={users}
+            hotelUid={hotelUid}
+          />
+        )}
+      </div>*/}
       {/* Services */}
       <h2 className="text-2xl font-bold text-gray-800 mb-4 mt-8">Services</h2>
       <motion.div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
@@ -442,6 +453,7 @@ const handleCreateUser = async () => {
           onClose={() => setAccessModal({ open: false, service: null })}
           uid={uid}
           users={users} // ← liste mise à jour
+          hotelUid={uid}
         />
       )}
     </div>

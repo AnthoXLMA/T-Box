@@ -1,21 +1,49 @@
 import React, { useState, useEffect } from "react";
+import axios from "axios";
+import { auth } from "../firebase";
 import ServiceAccessModal from "./ServiceAccessModal";
 
-function StaffTable({ hotelUid, users: initialUsers = [], refreshUsers }) {
-  const [users, setUsers] = useState(initialUsers);
+function StaffTable({ hotelUid }) {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [modalService, setModalService] = useState(null);
 
-  useEffect(() => {
-    setUsers(initialUsers); // mise à jour si la liste change
-  }, [initialUsers]);
+  const API_URL =
+    window.location.hostname === "localhost"
+      ? "http://localhost:4242"
+      : "https://us-central1-tipbox-a4f99.cloudfunctions.net/apiV2";
 
-  const openServiceModal = (user) => {
-    setModalService(user);
+  useEffect(() => {
+    const fetchUsers = async () => {
+      setLoading(true);
+      try {
+        const idToken = await auth.currentUser.getIdToken();
+        const res = await axios.get(`${API_URL}/users`, {
+          headers: { Authorization: `Bearer ${idToken}` },
+          params: { hotelUid },
+        });
+        setUsers(res.data || []);
+      } catch (err) {
+        console.error("Erreur récupération utilisateurs", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (hotelUid) fetchUsers();
+  }, [hotelUid]);
+
+  // Ouvre la modal pour modifier l'accès à un service spécifique
+  const openServiceModal = (serviceId) => {
+    setModalService(serviceId);
   };
 
   return (
     <div>
-      {users.length === 0 ? (
+      <h2 className="text-xl font-bold mb-4">Mon Staff</h2>
+      {loading ? (
+        <p>Chargement...</p>
+      ) : users.length === 0 ? (
         <p>Aucun utilisateur</p>
       ) : (
         <table className="min-w-full border">
@@ -53,12 +81,12 @@ function StaffTable({ hotelUid, users: initialUsers = [], refreshUsers }) {
         </table>
       )}
 
+
       {modalService && (
         <ServiceAccessModal
-          service={modalService} // ici l'utilisateur complet
+          service={modalService}
           onClose={() => setModalService(null)}
           hotelUid={hotelUid}
-          refreshUsers={refreshUsers} // optionnel si modal met à jour les services
         />
       )}
     </div>
