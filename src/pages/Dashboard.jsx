@@ -163,68 +163,99 @@ const handleCreateUser = async () => {
   }
 };
 
+// --- Envoi QR (email/SMS) ---
+// const handleSend = async () => {
+//   if (!contactInfo) return alert("Veuillez saisir un email ou numéro valide");
+//   setSending(true);
+//   try {
+//     await fetch(`${API_URL}/send-qr`, {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({
+//         service: sendModal.service.name,
+//         uid,
+//         type: sendModal.type,
+//         contact: contactInfo,
+//       }),
+//     });
+//     alert("QR code envoyé avec succès !");
+//     setSendModal({ open: false, type: "", service: null });
+//     setContactInfo("");
+//   } catch (err) {
+//     console.error(err);
+//     alert("Erreur lors de l'envoi");
+//   } finally {
+//     setSending(false);
+//   }
+// };
 
+const handleSend = async () => {
+  if (!contactInfo) return alert("Veuillez saisir un email ou numéro valide");
+  setSending(true);
+  try {
+    const idToken = await auth.currentUser.getIdToken();
+    const route = sendModal.type === "sms" ? "send-sms" : "send-qr";
 
-  // --- Envoi QR (email/SMS) ---
-  const handleSend = async () => {
-    if (!contactInfo) return alert("Veuillez saisir un email ou numéro valide");
-    setSending(true);
-    try {
-      await fetch(`${API_URL}/send-qr`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          service: sendModal.service.name,
-          uid,
-          type: sendModal.type,
-          contact: contactInfo,
-        }),
-      });
-      alert("QR code envoyé avec succès !");
-      setSendModal({ open: false, type: "", service: null });
-      setContactInfo("");
-    } catch (err) {
-      console.error(err);
-      alert("Erreur lors de l'envoi");
-    } finally {
-      setSending(false);
-    }
-  };
+    await fetch(`${API_URL}/${route}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${idToken}`,
+      },
+      body: JSON.stringify({
+        service: sendModal.service.name,
+        uid,
+        type: sendModal.type,
+        contact: contactInfo,
+        message: sendModal.type === "sms" ? `Voici votre QR code pour ${sendModal.service.name}` : undefined,
+      }),
+    });
 
-  // --- Impression QR ---
-  const handlePrint = async (service) => {
-    const value = `${window.location.origin}/tip?service=${service.name}&uid=${uid}`;
-    try {
-      const svgString = await QRCodeLib.toString(value, { type: "svg", width: 300 });
-      const printWindow = window.open("", "_blank");
+    alert(`QR code envoyé par ${sendModal.type === "sms" ? "SMS" : "email"} !`);
+    setSendModal({ open: false, type: "", service: null });
+    setContactInfo("");
+  } catch (err) {
+    console.error(err);
+    alert("Erreur lors de l'envoi");
+  } finally {
+    setSending(false);
+  }
+};
 
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>QR Code ${service.name}</title>
-            <style>
-              body { font-family: Arial; text-align: center; margin: 0; padding: 40px; background: #fff; }
-              .qr-container { margin-top: 20px; }
-            </style>
-          </head>
-          <body>
-            <img src="${tipboxLogo}" alt="Tipbox Logo" style="width:120px; display:block; margin:0 auto;" />
-            <div class="qr-container">
-              ${svgString.replace('<svg ', '<svg style="width:200px; height:auto;" ')}
-            </div>
-            <p style="font-size:14px; color:#555; margin:5px 0 10px 0;">Scannez ce QR code pour accéder à votre service Tipbox</p>
-            <h2 style="font-size:12px; font-weight:normal; color:#999; margin:0;">${service.name}</h2>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
-    } catch (err) {
-      console.error("Erreur génération QR code imprimable", err);
-      alert("Impossible de générer le QR code pour impression");
-    }
-  };
+// --- Impression QR ---
+const handlePrint = async (service) => {
+  const value = `${window.location.origin}/tip?service=${service.name}&uid=${uid}`;
+  try {
+    const svgString = await QRCodeLib.toString(value, { type: "svg", width: 300 });
+    const printWindow = window.open("", "_blank");
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>QR Code ${service.name}</title>
+          <style>
+            body { font-family: Arial; text-align: center; margin: 0; padding: 40px; background: #fff; }
+            .qr-container { margin-top: 20px; }
+          </style>
+        </head>
+        <body>
+          <img src="${tipboxLogo}" alt="Tipbox Logo" style="width:120px; display:block; margin:0 auto;" />
+          <div class="qr-container">
+            ${svgString.replace('<svg ', '<svg style="width:200px; height:auto;" ')}
+          </div>
+          <p style="font-size:14px; color:#555; margin:5px 0 10px 0;">Scannez ce QR code pour accéder à votre service Tipbox</p>
+          <h2 style="font-size:12px; font-weight:normal; color:#999; margin:0;">${service.name}</h2>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
+    printWindow.print();
+  } catch (err) {
+    console.error("Erreur génération QR code imprimable", err);
+    alert("Impossible de générer le QR code pour impression");
+  }
+};
 
   // const updatedUsers = await fetchUsers();
   // setUsers(updatedUsers);
