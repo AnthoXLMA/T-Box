@@ -16,10 +16,12 @@ const services = [
   { id: "restaurant", name: "Restaurant" },
   { id: "bar", name: "Bar" },
   { id: "spa", name: "Spa" },
-  { id: "room_service", name: "Room Service" },
-  { id: "concierge", name: "Concierge" },
+  { id: "staff", name: "Staff" },
+  { id: "concierge", name: "Conciergerie" },
+  { id: "réception", name: "Réception" },
   { id: "housekeeping", name: "Housekeeping" },
-  { id: "gym", name: "Salle de sport" },
+  { id: "gym", name: "Coach" },
+  { id: "commercial", name: "Commercial" },
 ];
 
 async function seedServices() {
