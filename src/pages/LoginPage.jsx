@@ -10,6 +10,11 @@ import { useNavigate } from "react-router-dom";
 import { FaHotel, FaUtensils, FaBuilding, FaMapMarkerAlt, FaPhone, FaSpa } from "react-icons/fa";
 import { doc, runTransaction } from "firebase/firestore";
 import TipBoxLogo from '../assets/TipBox.png';
+// import "dotenv/config";
+
+
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+console.log("Backend URL:", backendUrl);
 
 function LoginPage() {
   const [email, setEmail] = useState("");
@@ -36,15 +41,18 @@ function LoginPage() {
   const [isRedirecting, setIsRedirecting] = useState(false);
 
   const plans = [
-    { name: "Petit restaurant", monthlyFee: 15, includedQRCodes: 50 },
-    { name: "Hôtel moyen", monthlyFee: 30, includedQRCodes: 100 },
-    { name: "Grande chaîne", monthlyFee: 50, includedQRCodes: 300 },
+    { name: "Starter", monthlyFee: 12, includedQRCodes: 50 },
+    { name: "Standard", monthlyFee: 23, includedQRCodes: 100 },
+    { name: "Premium", monthlyFee: 34, includedQRCodes: 300 },
   ];
 
   // Redirection si déjà connecté
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
+
+        if (isRedirecting) return;
+
         const idTokenResult = await user.getIdTokenResult();
         const userRole = idTokenResult.claims.role || "director";
         const serviceId = idTokenResult.claims.serviceId || null;
@@ -111,9 +119,14 @@ function LoginPage() {
 
       // 3️⃣ Récupérer le token pour authentifier les fetchs backend
       const token = await user.getIdToken();
+      
+      // console.log("Backend URL:", process.env.REACT_APP_BACKEND_URL);
+      console.log("Backend URL:", import.meta.env.VITE_BACKEND_URL);
+
 
       // 4️⃣ Appeler backend pour créer l’utilisateur côté serveur
-      const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/create-user`, {
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/create-user`, {
+
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -136,12 +149,14 @@ function LoginPage() {
       const data = await response.json();
       console.log("Utilisateur backend créé:", data);
 
+
       // 5️⃣ Marquer redirection en cours et créer session Stripe
       setIsRedirecting(true);
-      await handleSubscriptionCheckout(token); // ⚠️ passe le token ici
+      await handleSubscriptionCheckout(token);
 
       return;
     }
+
 
     // --- Connexion classique ---
     userCredential = await signInWithEmailAndPassword(auth, email, password);
@@ -170,7 +185,7 @@ function LoginPage() {
 // -----------------------------
 const handleSubscriptionCheckout = async (token) => {
   try {
-    const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/create-subscription-session`, {
+    const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/create-subscription-session`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -196,109 +211,6 @@ const handleSubscriptionCheckout = async (token) => {
     setError(err.message || "Erreur serveur lors de la création de la session d’abonnement");
   }
 };
-
-
-
-//   const handleSubmit = async () => {
-//     if (!validateStep()) return;
-
-//     try {
-//       let userCredential;
-//       let user;
-
-//       if (isRegister) {
-//         // Création du compte Firebase
-//         userCredential = await createUserWithEmailAndPassword(auth, email, password);
-//         user = userCredential.user;
-//         const userId = user.uid;
-
-//         // Création des docs Firestore
-//         const siretRef = doc(db, "sirets", hotelSiret);
-//         const companyRef = doc(db, "companies", userId);
-
-//         await runTransaction(db, async (transaction) => {
-//           const siretDoc = await transaction.get(siretRef);
-//           if (siretDoc.exists()) throw new Error("Ce SIRET est déjà utilisé");
-//           transaction.set(siretRef, { companyId: userId });
-//           transaction.set(companyRef, {
-//             hotelName,
-//             hotelAddress,
-//             hotelPhone,
-//             hotelType,
-//             siret: hotelSiret,
-//             plan: selectedPlan,
-//             createdAt: new Date()
-//           });
-//         });
-
-//         // Récupération du token ici
-//         const token = await user.getIdToken();
-
-//         // Appel backend pour définir le rôle et hotelUid
-//         await fetch(`${process.env.REACT_APP_BACKEND_URL}/create-user`, {
-//           method: "POST",
-//           headers: { "Content-Type": "application/json",
-//           "Authorization": `Bearer ${token}`
-//           // "Authorization": `Bearer ${await auth.currentUser.getIdToken()}`
-//           },
-//           body: JSON.stringify({
-//             email,
-//             firstName: "",
-//             lastName: "",
-//             role: "director",
-//             hotelUid: userId
-//           })
-//         });
-
-//         await user.getIdToken(true);
-//         setIsRedirecting(true);
-
-//         await handleSubscriptionCheckout(userId, token);
-//         return;
-//       } else {
-//         userCredential = await signInWithEmailAndPassword(auth, email, password);
-//         user = userCredential.user;
-//       }
-//       // Récupérer les claims à jour
-//       const idTokenResult = await user.getIdTokenResult();
-//       setRole(idTokenResult.claims.role || "director");
-//       setManagerServiceId(idTokenResult.claims.serviceId || null);
-//       navigate("/dashboard");
-//     } catch (err) {
-//       const messages = {
-//         "auth/email-already-in-use": "Cet email est déjà utilisé",
-//         "auth/invalid-email": "Email invalide",
-//         "auth/user-not-found": "Utilisateur non trouvé",
-//         "auth/wrong-password": "Mot de passe incorrect"
-//       };
-//       setError(messages[err.code] || err.message);
-//     }
-//   };
-
-//   const handleSubscriptionCheckout = async (userId, token) => {
-//   try {
-//     const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/create-subscription-session`, {
-//       method: "POST",
-//       headers: {
-//         "Content-Type": "application/json",
-//         "Authorization": `Bearer ${token}` // utilise le token passé en param
-//       },
-//       body: JSON.stringify({ plan: selectedPlan.name })
-//     });
-
-//     const data = await response.json();
-
-//     if (data.url) {
-//       window.location.href = data.url; // redirection vers Stripe
-//     } else {
-//       setError("Impossible de créer la session d’abonnement");
-//     }
-//   } catch (err) {
-//     console.error(err);
-//     setError("Erreur serveur lors de la création de la session d’abonnement");
-//   }
-// };
-
   return (
     <div className="flex flex-col md:flex-row h-screen">
       {/* Branding */}

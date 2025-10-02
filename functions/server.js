@@ -474,9 +474,9 @@ app.post("/create-subscription-session", verifyToken, async (req, res) => {
   if (!plan) return res.status(400).json({ error: "Plan manquant" });
 
   const planPrices = {
-    "Petit restaurant": process.env.STRIPE_PRICE_SMALL,
-    "Hôtel moyen": process.env.STRIPE_PRICE_MEDIUM,
-    "Grande chaîne": process.env.STRIPE_PRICE_LARGE,
+    "Starter": process.env.STRIPE_PRICE_SMALL,
+    "Standard": process.env.STRIPE_PRICE_MEDIUM,
+    "Premium": process.env.STRIPE_PRICE_LARGE,
   };
 
   const priceId = planPrices[plan];

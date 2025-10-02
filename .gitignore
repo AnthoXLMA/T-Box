@@ -38,6 +38,9 @@ firebase-debug.*.log
 .env
 .env.local
 
+.env.production
+
+
 functions/.env
 functions/.env.local
 
