@@ -84,7 +84,6 @@ function LoginPage() {
 
   const handleNext = () => { if (validateStep()) setStep(prev => prev + 1); };
   const handleBack = () => setStep(prev => prev - 1);
-
   const handleSubmit = async () => {
   if (!validateStep()) return;
 
@@ -119,14 +118,13 @@ function LoginPage() {
 
       // 3️⃣ Récupérer le token pour authentifier les fetchs backend
       const token = await user.getIdToken();
-      
+
       // console.log("Backend URL:", process.env.REACT_APP_BACKEND_URL);
       console.log("Backend URL:", import.meta.env.VITE_BACKEND_URL);
 
 
       // 4️⃣ Appeler backend pour créer l’utilisateur côté serveur
       const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/create-user`, {
-
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -149,14 +147,12 @@ function LoginPage() {
       const data = await response.json();
       console.log("Utilisateur backend créé:", data);
 
-
       // 5️⃣ Marquer redirection en cours et créer session Stripe
       setIsRedirecting(true);
       await handleSubscriptionCheckout(token);
 
       return;
     }
-
 
     // --- Connexion classique ---
     userCredential = await signInWithEmailAndPassword(auth, email, password);

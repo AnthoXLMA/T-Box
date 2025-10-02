@@ -581,6 +581,14 @@ app.post(
               plan: subscription.metadata.plan,
               subscriptionId: subscription.id
             }, { merge: true });
+          await admin.firestore()
+            .collection("companies")
+            .doc(subscription.metadata.userId)
+            .update({
+              subscriptionStatus: "active",
+              plan: subscription.metadata.plan,
+              subscriptionId: subscription.id
+            });
           console.log(`Abonnement activé pour user ${subscription.metadata.userId}`);
         }
       } catch (err) {
@@ -592,7 +600,5 @@ app.post(
     res.status(200).send('ok');
   }
 );
-
-
   return app;
 }
