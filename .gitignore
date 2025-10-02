@@ -37,6 +37,7 @@ firebase-debug.*.log
 # Env files (clés sensibles)
 .env
 .env.local
+.env.production
 
 functions/.env
 functions/.env.local
