@@ -152,7 +152,8 @@ app.get("/users", verifyToken, async (req, res) => {
 });
 
 // Créer ou mettre à jour un utilisateur
-app.post("/create-user", verifyToken, async (req, res) => {
+// app.post("/create-user", verifyToken, async (req, res) => {
+  app.post("/create-user", async (req, res) => {
   console.log("Body reçu:", req.body);
   const { email, firstName, lastName, role, hotelUid, serviceIds = [] } = req.body;
   if (!email || !role || !hotelUid) return res.status(400).json({ error: "Champs manquants" });
