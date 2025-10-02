@@ -1,6 +1,8 @@
 // src/pages/Dashboard.jsx
 import React, { useEffect, useState } from "react";
 import { auth, signOut, onAuthStateChanged } from "../firebase";
+// import { doc, getDoc } from "firebase/firestore";
+// import { db } from "../firebase";
 import { useNavigate } from "react-router-dom";
 import ModalQRCode from "../components/ModalQRCode";
 import ServiceAccessModal from "../components/ServiceAccessModal";
@@ -51,6 +53,13 @@ function Dashboard() {
         setUid(user.uid);
         setRole(userRole);
         setManagerServiceId(serviceId);
+
+        // --- Vérification abonnement ---
+      const companyDoc = await getDoc(doc(db, "companies", user.uid));
+      if (!companyDoc.exists() || companyDoc.data().subscriptionStatus !== "active") {
+        navigate("/pricing"); // Redirige vers page de paiement
+        return; // Stoppe l’exécution du dashboard
+      }
 
         const allServices = await fetchServices();
         setServices(
