@@ -410,6 +410,94 @@ app.post("/send-sms", verifyToken, async (req, res) => {
     }
   });
 
+//Route pour accès premium
+// Vérifie si l'hôtel a un plan premium
+app.get("/premium-status", verifyToken, async (req, res) => {
+  try {
+    const user = await admin.auth().getUser(req.user.uid);
+    const userDoc = await admin.firestore().collection("companies").doc(user.uid).get();
+    const plan = userDoc.data()?.plan?.name || "standard";
+    const isPremium = ["Grande chaîne"].includes(plan); // tu peux ajouter d'autres plans premium
+    res.json({ plan, isPremium });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+//Route pour rapports statistiques
+app.get("/premium/stats", verifyToken, async (req, res) => {
+  try {
+    const user = await admin.auth().getUser(req.user.uid);
+    const servicesSnap = await admin.firestore().collection("services").where("uid", "==", user.uid).get();
+
+    const stats = await Promise.all(servicesSnap.docs.map(async doc => {
+      const serviceId = doc.id;
+      const tipsSnap = await admin.firestore().collection("tips")
+        .where("serviceId", "==", serviceId).get();
+      const totalTips = tipsSnap.docs.reduce((sum, t) => sum + (t.data().amount || 0), 0);
+      return { serviceId, serviceName: doc.data().name, totalTips };
+    }));
+
+    res.json({ stats });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Route pour envoi QR/SMS avancé - Permet de programmer ou envoyer en masse les QR codes pour les clients premium
+app.post("/premium/send-bulk", verifyToken, async (req, res) => {
+  const { contacts, service, type, message } = req.body;
+  if (!contacts || !service || !type) return res.status(400).json({ error: "Champs manquants" });
+
+  try {
+    for (let contact of contacts) {
+      if(type === 'sms') {
+        await sendSms(service, req.user.uid, contact, message);
+      } else {
+        await sendEmail(service, contact, message);
+      }
+    }
+    res.json({ success: true, sent: contacts.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+//Paiement des abonnements pour un directeur/abonné
+app.post("/create-subscription-session", verifyToken, async (req, res) => {
+  const { plan } = req.body; // "Petit restaurant", "Hôtel moyen", "Grande chaîne"
+  if (!plan) return res.status(400).json({ error: "Plan manquant" });
+
+  const planPrices = {
+    "Petit restaurant": process.env.STRIPE_PRICE_SMALL,
+    "Hôtel moyen": process.env.STRIPE_PRICE_MEDIUM,
+    "Grande chaîne": process.env.STRIPE_PRICE_LARGE,
+  };
+
+  const priceId = planPrices[plan];
+  if (!priceId) return res.status(400).json({ error: "Plan invalide" });
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ["card"],
+      mode: "subscription",
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${FRONTEND_URL}/dashboard?subscription=success`,
+      cancel_url: `${FRONTEND_URL}/dashboard?subscription=cancel`,
+      metadata: { userId: req.user.uid, plan },
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error("Erreur création abonnement :", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
   // --- Stripe Checkout ---
   app.post("/create-checkout-session", async (req, res) => {
     if (!stripe) return res.status(500).json({ error: "Stripe non configuré" });
@@ -452,9 +540,58 @@ app.post("/send-sms", verifyToken, async (req, res) => {
     }
   });
 
+  // // --- Stripe Webhook ---
+  // app.options('/webhook', cors(corsOptions));
+  // app.post("/webhook", cors(corsOptions), express.raw({ type: 'application/json' }), (req, res) => res.status(200).send('ok'));
+
   // --- Stripe Webhook ---
-  app.options('/webhook', cors(corsOptions));
-  app.post("/webhook", cors(corsOptions), express.raw({ type: 'application/json' }), (req, res) => res.status(200).send('ok'));
+app.options('/webhook', cors(corsOptions));
+
+app.post(
+  "/webhook",
+  cors(corsOptions),
+  express.raw({ type: 'application/json' }),
+  async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    let event;
+
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        sig,
+        process.env.STRIPE_WEBHOOK_SECRET
+      );
+    } catch (err) {
+      console.error("Webhook signature mismatch:", err.message);
+      return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
+
+    // --- uniquement pour les abonnements utilisateurs ---
+    if (event.type === "customer.subscription.created" || event.type === "invoice.paid") {
+      try {
+        const subscription = await stripe.subscriptions.retrieve(event.data.object.id);
+
+        if (subscription.metadata?.userId && subscription.metadata?.plan) {
+          await admin.firestore()
+            .collection("companies")
+            .doc(subscription.metadata.userId)
+            .set({
+              planPaid: true,
+              plan: subscription.metadata.plan,
+              subscriptionId: subscription.id
+            }, { merge: true });
+          console.log(`Abonnement activé pour user ${subscription.metadata.userId}`);
+        }
+      } catch (err) {
+        console.error("Erreur activation abonnement :", err);
+      }
+    }
+
+    // renvoyer 200 à Stripe pour confirmer la réception
+    res.status(200).send('ok');
+  }
+);
+
 
   return app;
 }

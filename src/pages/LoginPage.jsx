@@ -33,6 +33,8 @@ function LoginPage() {
   // Plan sélectionné
   const [selectedPlan, setSelectedPlan] = useState(null);
 
+  const [isRedirecting, setIsRedirecting] = useState(false);
+
   const plans = [
     { name: "Petit restaurant", monthlyFee: 15, includedQRCodes: 50 },
     { name: "Hôtel moyen", monthlyFee: 30, includedQRCodes: 100 },
@@ -74,7 +76,6 @@ function LoginPage() {
 
   const handleNext = () => { if (validateStep()) setStep(prev => prev + 1); };
   const handleBack = () => setStep(prev => prev - 1);
-
   const handleSubmit = async () => {
     if (!validateStep()) return;
 
@@ -107,10 +108,16 @@ function LoginPage() {
           });
         });
 
+        // Récupération du token ici
+        const token = await user.getIdToken();
+
         // Appel backend pour définir le rôle et hotelUid
         await fetch(`${process.env.REACT_APP_BACKEND_URL}/create-user`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json",
+          // "Authorization": `Bearer ${token}`
+          "Authorization": `Bearer ${await auth.currentUser.getIdToken()}`
+          },
           body: JSON.stringify({
             email,
             firstName: "",
@@ -120,21 +127,20 @@ function LoginPage() {
           })
         });
 
-        // Forcer le refresh du token pour récupérer les customClaims
         await user.getIdToken(true);
+        setIsRedirecting(true);
 
+        await handleSubscriptionCheckout(userId);
+        return;
       } else {
         userCredential = await signInWithEmailAndPassword(auth, email, password);
         user = userCredential.user;
       }
-
       // Récupérer les claims à jour
       const idTokenResult = await user.getIdTokenResult();
       setRole(idTokenResult.claims.role || "director");
       setManagerServiceId(idTokenResult.claims.serviceId || null);
-
       navigate("/dashboard");
-
     } catch (err) {
       const messages = {
         "auth/email-already-in-use": "Cet email est déjà utilisé",
@@ -145,6 +151,33 @@ function LoginPage() {
       setError(messages[err.code] || err.message);
     }
   };
+
+  const handleSubscriptionCheckout = async (userId) => {
+  try {
+    const response = await fetch(`${process.env.REACT_APP_BACKEND_URL}/create-subscription-session`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${await auth.currentUser.getIdToken()}`
+        // "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        plan: selectedPlan.name
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.url) {
+      window.location.href = data.url; // redirige vers Stripe
+    } else {
+      setError("Impossible de créer la session d’abonnement");
+    }
+  } catch (err) {
+    console.error(err);
+    setError("Erreur serveur lors de la création de la session d’abonnement");
+  }
+};
 
   return (
     <div className="flex flex-col md:flex-row h-screen">
@@ -238,10 +271,14 @@ function LoginPage() {
             </button>
           </>
         )}
-
         <button onClick={() => { setIsRegister(!isRegister); setError(""); setStep(1); }} className="text-indigo-600 font-semibold hover:underline mt-2">
           {isRegister ? "Déjà un compte ? Se connecter" : "Pas de compte ? S'inscrire"}
         </button>
+        {isRedirecting && (
+          <p className="text-indigo-600 font-semibold mt-2">
+            Inscription réussie ! Vous allez être redirigé vers le paiement de votre abonnement…
+          </p>
+        )}
       </div>
     </div>
   );
