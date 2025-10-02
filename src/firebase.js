@@ -12,12 +12,12 @@ import { getFirestore, collection, getDocs } from "firebase/firestore";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
-  apiKey: "AIzaSyATcU-Ee6wGD_7-EQ2aGNpR4etzHmWpnt8",
-  authDomain: "tipbox-a4f99.firebaseapp.com",
-  projectId: "tipbox-a4f99",
-  storageBucket: "tipbox-a4f99.firebasestorage.app",
-  messagingSenderId: "586501497047",
-  appId: "1:586501497047:web:8d67408a7ec21907969092"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 export const fetchServices = async () => {
