@@ -10,7 +10,7 @@ function StaffTable({ hotelUid }) {
 
   const API_URL =
     window.location.hostname === "localhost"
-      ? "http://localhost:4242"
+      ? "http://localhost:4173"
       : "https://us-central1-tipbox-a4f99.cloudfunctions.net/apiV2";
 
   useEffect(() => {
@@ -42,7 +42,7 @@ function StaffTable({ hotelUid }) {
     <div>
       <h2 className="text-xl font-bold mb-4">Mon Staff</h2>
       {loading ? (
-        <p>Chargement...</p>
+        <p>StaffTable.</p>
       ) : users.length === 0 ? (
         <p>Aucun utilisateur</p>
       ) : (

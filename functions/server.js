@@ -5,6 +5,7 @@ import nodemailer from "nodemailer";
 import admin from "./firebaseAdmin.js";
 import "dotenv/config";
 import fetch from "node-fetch";
+// import { verifySiret } from "../src/helpers/verifySiret.js";
 
 
 export function createApp({ stripeKey, emailUser, emailPass }) {
@@ -69,6 +70,7 @@ export function createApp({ stripeKey, emailUser, emailPass }) {
     const displayName = userRecord.displayName || `${firstName} ${lastName}`.trim();
     const services = Array.from(new Set([...(userRecord.customClaims?.services || []).map(String), ...toStrArray(serviceIds)]));
     const lockedServices = (userRecord.customClaims?.lockedServices || []).map(String);
+    // const { consent } = req.body;
 
     const doc = {
       email,
@@ -79,6 +81,7 @@ export function createApp({ stripeKey, emailUser, emailPass }) {
       hotelUid: hotelUid || userRecord.customClaims?.hotelUid || null,
       services,
       lockedServices,
+      // consent,
       updatedAt: new Date()
     };
 
@@ -120,21 +123,34 @@ export function createApp({ stripeKey, emailUser, emailPass }) {
     return { uid: userRecord.uid, isNewUser };
   }
 
-  // --- Middleware token Firebase ---
-  async function verifyToken(req, res, next) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return res.status(403).json({ error: "No token" });
-
-    const idToken = authHeader.split("Bearer ")[1];
-    try {
-      const decodedToken = await admin.auth().verifyIdToken(idToken);
-      req.user = decodedToken;
-      next();
-    } catch (err) {
-      console.error("Token invalide :", err);
-      res.status(403).json({ error: "Unauthorized" });
+// --- Middleware rôle ---
+function requireRole(...allowedRoles) {
+  return (req, res, next) => {
+    const userRole = req.user?.role;
+    if (!allowedRoles.includes(userRole)) {
+      return res.status(403).json({ error: "Accès refusé : rôle insuffisant" });
     }
+    next();
+  };
+}
+
+// --- Middleware token Firebase ---
+async function verifyToken(req, res, next) {
+  const authHeader = req.headers.authorization;
+  console.log("🔹 Authorization header reçu :", authHeader);
+  if (!authHeader?.startsWith("Bearer "))
+    return res.status(403).json({ error: "No token" });
+
+  const idToken = authHeader.split("Bearer ")[1];
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    req.user = decodedToken;
+    next();
+  } catch (err) {
+    console.error("Token invalide :", err);
+    res.status(403).json({ error: "Unauthorized" });
   }
+}
 
 // --- Routes utilisateurs ---
 app.get("/users", verifyToken, async (req, res) => {
@@ -152,8 +168,7 @@ app.get("/users", verifyToken, async (req, res) => {
 });
 
 // Créer ou mettre à jour un utilisateur
-// app.post("/create-user", verifyToken, async (req, res) => {
-  app.post("/create-user", async (req, res) => {
+app.post("/create-user", verifyToken, requireRole("director", "manager"), async (req, res) => {
   console.log("Body reçu:", req.body);
   const { email, firstName, lastName, role, hotelUid, serviceIds = [] } = req.body;
   if (!email || !role || !hotelUid) return res.status(400).json({ error: "Champs manquants" });
@@ -163,6 +178,22 @@ app.get("/users", verifyToken, async (req, res) => {
     res.json({ success: true, ...result });
   } catch (err) {
     console.error("Erreur create-user:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/delete-user", verifyToken, async (req, res) => {
+  const uid = req.user.uid;
+  try {
+    await admin.auth().deleteUser(uid);
+    const collections = ["users", "tips", "services", "companies"];
+    for (const col of collections) {
+      const docRef = admin.firestore().collection(col).doc(uid);
+      await docRef.delete().catch(() => {});
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Erreur suppression utilisateur :", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -244,6 +275,118 @@ app.post("/update-user-services", verifyToken, async (req, res) => {
   }
 });
 
+// server.js (ou ton fichier d'API V2)
+
+// Création d'une nouvelle company et attribution du rôle "director" à son créateur
+app.post("/register-company", verifyToken, async (req, res) => {
+  try {
+    const { hotelName, hotelAddress, hotelPhone, hotelType, siret, plan } = req.body;
+    const uid = req.user.uid; // uid du user connecté (directeur en devenir)
+
+    if (!siret || !hotelName || !hotelAddress || !hotelPhone || !hotelType || !plan) {
+      return res.status(400).json({ error: "Champs manquants pour l'inscription de l'entreprise" });
+    }
+
+    // Vérif format SIRET
+    if (!/^\d{14}$/.test(siret)) {
+      return res.status(400).json({ error: "SIRET invalide (14 chiffres requis)" });
+    }
+
+    const siretRef = db.collection("sirets").doc(siret);
+    const companyRef = db.collection("companies").doc(uid);
+
+    await db.runTransaction(async (transaction) => {
+      const siretDoc = await transaction.get(siretRef);
+      if (siretDoc.exists) {
+        throw new Error("Ce SIRET est déjà enregistré");
+      }
+
+      // Enregistre le lien SIRET → company
+      transaction.set(siretRef, { companyId: uid });
+
+      // Crée la company
+      transaction.set(companyRef, {
+        hotelName,
+        hotelAddress,
+        hotelPhone,
+        hotelType,
+        siret,
+        plan,
+        createdAt: new Date(),
+      });
+    });
+
+    // 🔑 Met à jour le rôle du user → director
+    await admin.auth().setCustomUserClaims(uid, {
+      role: "director",
+      serviceId: uid, // très pratique pour requêter
+    });
+
+    // Force le refresh du token côté frontend
+    const userRecord = await admin.auth().getUser(uid);
+
+    res.json({
+      message: "Entreprise enregistrée avec succès",
+      role: "director",
+      companyId: uid,
+      user: {
+        uid: userRecord.uid,
+        email: userRecord.email,
+        claims: userRecord.customClaims,
+      },
+    });
+
+  } catch (err) {
+    console.error("Erreur /register-company:", err);
+    res.status(500).json({ error: err.message || "Erreur serveur" });
+  }
+});
+
+
+// app.post("/register-company", verifyToken, async (req, res) => {
+//   const { siret } = req.body;
+//   if (!siret) return res.status(400).json({ error: "SIRET manquant" });
+
+//   try {
+//     const companyInfo = await verifySiret(siret);
+
+//     await admin.firestore().collection("companies").doc(req.user.uid).set({
+//       siret,
+//       companyName: companyInfo.name,
+//       address: companyInfo.address,
+//       verified: true,
+//       updatedAt: new Date()
+//     });
+
+//     res.json({ success: true, companyInfo });
+//   } catch (err) {
+//     console.error(err);
+//     res.status(400).json({ error: err.message });
+//   }
+// });
+
+// app.post("/verify-siret", verifyToken, async (req, res) => {
+//   const { siret } = req.body;
+//   if (!siret) return res.status(400).json({ error: "SIRET manquant" });
+
+//   try {
+//     const companyInfo = await verifySiret(siret);
+
+//     await admin.firestore().collection("companies").doc(req.user.uid).set({
+//       siret,
+//       companyName: companyInfo.name,
+//       address: companyInfo.address,
+//       verified: true,
+//       updatedAt: new Date()
+//     }, { merge: true });
+
+//     res.json({ success: true, companyInfo });
+//   } catch (err) {
+//     console.error("Erreur vérification SIRET :", err);
+//     res.status(400).json({ error: err.message });
+//   }
+// });
+
 // Retirer un service à un utilisateur
 app.post("/remove-service-user", verifyToken, async (req, res) => {
   const { uid, serviceId } = req.body;
@@ -264,36 +407,35 @@ app.post("/remove-service-user", verifyToken, async (req, res) => {
   }
 });
 
-// Verrouiller un service pour un utilisateur
-app.post("/lock-service-user", verifyToken, async (req, res) => {
-  const { uid, serviceId } = req.body;
-  if (!uid || !serviceId) return res.status(400).json({ error: "uid et serviceId obligatoires" });
+  // Verrouiller un service pour un utilisateur
+  app.post("/lock-service-user", verifyToken, async (req, res) => {
+    const { uid, serviceId } = req.body;
+    if (!uid || !serviceId) return res.status(400).json({ error: "uid et serviceId obligatoires" });
 
-  try {
-    const user = await admin.auth().getUser(uid);
-    const currentLocked = user.customClaims?.lockedServices || [];
-    const updatedLocked = currentLocked.includes(String(serviceId))
-      ? currentLocked
-      : [...currentLocked.map(String), String(serviceId)];
+    try {
+      const user = await admin.auth().getUser(uid);
+      const currentLocked = user.customClaims?.lockedServices || [];
+      const updatedLocked = currentLocked.includes(String(serviceId))
+        ? currentLocked
+        : [...currentLocked.map(String), String(serviceId)];
 
-    await admin.auth().setCustomUserClaims(uid, {
-      ...user.customClaims,
-      lockedServices: updatedLocked
-    });
+      await admin.auth().setCustomUserClaims(uid, {
+        ...user.customClaims,
+        lockedServices: updatedLocked
+      });
 
-    await admin.firestore().collection("users").doc(uid).set({
-      lockedServices: updatedLocked,
-      updatedAt: new Date()
-    }, { merge: true });
+      await admin.firestore().collection("users").doc(uid).set({
+        lockedServices: updatedLocked,
+        updatedAt: new Date()
+      }, { merge: true });
 
-    res.json({ success: true, lockedServices: updatedLocked });
-  } catch (err) {
-    console.error("Erreur lock-service-user:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json({ success: true, lockedServices: updatedLocked });
+    } catch (err) {
+      console.error("Erreur lock-service-user:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
-  // --- Routes services ---
   app.post("/services", verifyToken, async (req, res) => {
     const { name, uid } = req.body;
     if (!name || !uid) return res.status(400).json({ error: "Nom et uid obligatoires" });
@@ -321,62 +463,61 @@ app.post("/lock-service-user", verifyToken, async (req, res) => {
   });
 
   app.post("/send-qr", verifyToken, async (req, res) => {
-  const { service, uid, type, contact } = req.body;
-  if (!service || !uid || !contact) return res.status(400).json({ error: "Champs manquants" });
+    const { service, uid, type, contact } = req.body;
+    if (!service || !uid || !contact) return res.status(400).json({ error: "Champs manquants" });
 
-  try {
-    // Ici tu peux utiliser Nodemailer pour envoyer l'email
-    await transporter.sendMail({
-      from: `"TipBox" <${emailUser}>`,
-      to: contact,
-      subject: `QR Code pour ${service}`,
-      text: `Voici votre QR code pour le service ${service} : ...`
-    });
+    try {
+      await transporter.sendMail({
+        from: `"TipBox" <${emailUser}>`,
+        to: contact,
+        subject: `QR Code pour ${service}`,
+        text: `Voici votre QR code pour le service ${service} : ...`
+      });
 
-    res.json({ success: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post("/send-sms", verifyToken, async (req, res) => {
-  const { service, uid, contact, message } = req.body;
-  if (!service || !uid || !contact) return res.status(400).json({ error: "Champs manquants" });
-
-  try {
-    if (!process.env.BREVO_API_KEY) {
-      throw new Error("Brevo non configuré");
+      res.json({ success: true });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
     }
+  });
 
-    // Envoi du SMS via Brevo
-    const response = await fetch("https://api.brevo.com/v3/sms/send", {
-      method: "POST",
-      headers: {
-        "accept": "application/json",
-        "api-key": process.env.BREVO_API_KEY,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        sender: "TipBox", // expéditeur validé
-        recipient: contact, // numéro du client en format international +33...
-        content: message || `Voici votre QR code pour ${service} : ...`,
-        type: "transactional"
-      }),
-    });
+  app.post("/send-sms", verifyToken, async (req, res) => {
+    const { service, uid, contact, message } = req.body;
+    if (!service || !uid || !contact) return res.status(400).json({ error: "Champs manquants" });
 
-    const data = await response.json();
+    try {
+      if (!process.env.BREVO_API_KEY) {
+        throw new Error("Brevo non configuré");
+      }
 
-    if (data.messageId || data.success) {
-      res.json({ success: true, data });
-    } else {
-      throw new Error(`Erreur Brevo : ${JSON.stringify(data)}`);
+      // Envoi du SMS via Brevo
+      const response = await fetch("https://api.brevo.com/v3/sms/send", {
+        method: "POST",
+        headers: {
+          "accept": "application/json",
+          "api-key": process.env.BREVO_API_KEY,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sender: "TipBox",
+          recipient: contact,
+          content: message || `Voici votre QR code pour ${service} : ...`,
+          type: "transactional"
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.messageId || data.success) {
+        res.json({ success: true, data });
+      } else {
+        throw new Error(`Erreur Brevo : ${JSON.stringify(data)}`);
+      }
+    } catch (err) {
+      console.error("Erreur envoi SMS :", err);
+      res.status(500).json({ error: err.message });
     }
-  } catch (err) {
-    console.error("Erreur envoi SMS :", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+  });
 
   app.post("/tip-qr", async (req, res) => {
     const { service, uid, amount, message } = req.body;
@@ -411,95 +552,87 @@ app.post("/send-sms", verifyToken, async (req, res) => {
     }
   });
 
-//Route pour accès premium
-// Vérifie si l'hôtel a un plan premium
-app.get("/premium-status", verifyToken, async (req, res) => {
-  try {
-    const user = await admin.auth().getUser(req.user.uid);
-    const userDoc = await admin.firestore().collection("companies").doc(user.uid).get();
-    const plan = userDoc.data()?.plan?.name || "standard";
-    const isPremium = ["Grande chaîne"].includes(plan); // tu peux ajouter d'autres plans premium
-    res.json({ plan, isPremium });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-//Route pour rapports statistiques
-app.get("/premium/stats", verifyToken, async (req, res) => {
-  try {
-    const user = await admin.auth().getUser(req.user.uid);
-    const servicesSnap = await admin.firestore().collection("services").where("uid", "==", user.uid).get();
-
-    const stats = await Promise.all(servicesSnap.docs.map(async doc => {
-      const serviceId = doc.id;
-      const tipsSnap = await admin.firestore().collection("tips")
-        .where("serviceId", "==", serviceId).get();
-      const totalTips = tipsSnap.docs.reduce((sum, t) => sum + (t.data().amount || 0), 0);
-      return { serviceId, serviceName: doc.data().name, totalTips };
-    }));
-
-    res.json({ stats });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Route pour envoi QR/SMS avancé - Permet de programmer ou envoyer en masse les QR codes pour les clients premium
-app.post("/premium/send-bulk", verifyToken, async (req, res) => {
-  const { contacts, service, type, message } = req.body;
-  if (!contacts || !service || !type) return res.status(400).json({ error: "Champs manquants" });
-
-  try {
-    for (let contact of contacts) {
-      if(type === 'sms') {
-        await sendSms(service, req.user.uid, contact, message);
-      } else {
-        await sendEmail(service, contact, message);
-      }
+  app.get("/premium-status", verifyToken, async (req, res) => {
+    try {
+      const user = await admin.auth().getUser(req.user.uid);
+      const userDoc = await admin.firestore().collection("companies").doc(user.uid).get();
+      const plan = userDoc.data()?.plan?.name || "standard";
+      const isPremium = ["Grande chaîne"].includes(plan); // tu peux ajouter d'autres plans premium
+      res.json({ plan, isPremium });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
     }
-    res.json({ success: true, sent: contacts.length });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
+  });
 
+  app.get("/premium/stats", verifyToken, async (req, res) => {
+    try {
+      const user = await admin.auth().getUser(req.user.uid);
+      const servicesSnap = await admin.firestore().collection("services").where("uid", "==", user.uid).get();
 
-//Paiement des abonnements pour un directeur/abonné
-app.post("/create-subscription-session", verifyToken, async (req, res) => {
-  const { plan } = req.body; // "Petit restaurant", "Hôtel moyen", "Grande chaîne"
-  if (!plan) return res.status(400).json({ error: "Plan manquant" });
+      const stats = await Promise.all(servicesSnap.docs.map(async doc => {
+        const serviceId = doc.id;
+        const tipsSnap = await admin.firestore().collection("tips")
+          .where("serviceId", "==", serviceId).get();
+        const totalTips = tipsSnap.docs.reduce((sum, t) => sum + (t.data().amount || 0), 0);
+        return { serviceId, serviceName: doc.data().name, totalTips };
+      }));
 
-  const planPrices = {
-    "Starter": process.env.STRIPE_PRICE_SMALL,
-    "Standard": process.env.STRIPE_PRICE_MEDIUM,
-    "Premium": process.env.STRIPE_PRICE_LARGE,
-  };
+      res.json({ stats });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
-  const priceId = planPrices[plan];
-  if (!priceId) return res.status(400).json({ error: "Plan invalide" });
+  app.post("/premium/send-bulk", verifyToken, async (req, res) => {
+    const { contacts, service, type, message } = req.body;
+    if (!contacts || !service || !type) return res.status(400).json({ error: "Champs manquants" });
 
-  try {
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ["card"],
-      mode: "subscription",
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${FRONTEND_URL}/dashboard?subscription=success`,
-      cancel_url: `${FRONTEND_URL}/dashboard?subscription=cancel`,
-      metadata: { userId: req.user.uid, plan },
-    });
-    res.json({ url: session.url });
-  } catch (err) {
-    console.error("Erreur création abonnement :", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+    try {
+      for (let contact of contacts) {
+        if(type === 'sms') {
+          await sendSms(service, req.user.uid, contact, message);
+        } else {
+          await sendEmail(service, contact, message);
+        }
+      }
+      res.json({ success: true, sent: contacts.length });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
+  app.post("/create-subscription-session", verifyToken, async (req, res) => {
+    const { plan } = req.body;
+    if (!plan) return res.status(400).json({ error: "Plan manquant" });
 
-  // --- Stripe Checkout ---
+    const planPrices = {
+      "Starter": process.env.STRIPE_PRICE_SMALL,
+      "Standard": process.env.STRIPE_PRICE_MEDIUM,
+      "Premium": process.env.STRIPE_PRICE_LARGE,
+    };
+
+    const priceId = planPrices[plan];
+    if (!priceId) return res.status(400).json({ error: "Plan invalide" });
+
+    try {
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ["card"],
+        mode: "subscription",
+        line_items: [{ price: priceId, quantity: 1 }],
+        success_url: `${FRONTEND_URL}/dashboard?subscription=success`,
+        cancel_url: `${FRONTEND_URL}/dashboard?subscription=cancel`,
+        metadata: { userId: req.user.uid, plan },
+      });
+      res.json({ url: session.url });
+    } catch (err) {
+      console.error("Erreur création abonnement :", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.post("/create-checkout-session", async (req, res) => {
     if (!stripe) return res.status(500).json({ error: "Stripe non configuré" });
     try {
@@ -541,64 +674,114 @@ app.post("/create-subscription-session", verifyToken, async (req, res) => {
     }
   });
 
+app.post("/create-connected-account", verifyToken, async (req, res) => {
+  console.log("🔹 req.user:", req.user);
+  console.log("Création compte Stripe pour :", req.user.email);
+  try {
+    const account = await stripe.accounts.create({
+      type: "express",
+      country: "FR",
+      email: req.user.email,
+    });
+
+    const accountLink = await stripe.accountLinks.create({
+      account: account.id,
+      refresh_url: `${FRONTEND_URL}/dashboard`,
+      return_url: `${FRONTEND_URL}/dashboard?connected=success`,
+      type: "account_onboarding",
+    });
+
+    await admin.firestore().collection("companies").doc(req.user.uid).set({
+      stripeAccountId: account.id,
+    }, { merge: true });
+
+    res.json({ url: accountLink.url });
+  } catch (err) {
+    console.error("Erreur création compte Stripe Connect:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/create-payment-intent", async (req, res) => {
+  try {
+    const { amount, connectedAccountId } = req.body;
+
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount,
+      currency: "eur",
+      payment_method_types: ["card"],
+      transfer_data: {
+        destination: connectedAccountId,
+      },
+      application_fee_amount: Math.floor(amount * 0.10),
+    });
+
+    res.json({ clientSecret: paymentIntent.client_secret });
+  } catch (err) {
+    console.error("Erreur création PaymentIntent:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
   // // --- Stripe Webhook ---
   // app.options('/webhook', cors(corsOptions));
   // app.post("/webhook", cors(corsOptions), express.raw({ type: 'application/json' }), (req, res) => res.status(200).send('ok'));
 
   // --- Stripe Webhook ---
-app.options('/webhook', cors(corsOptions));
+  app.options('/webhook', cors(corsOptions));
 
-app.post(
-  "/webhook",
-  cors(corsOptions),
-  express.raw({ type: 'application/json' }),
-  async (req, res) => {
-    const sig = req.headers['stripe-signature'];
-    let event;
+  app.post(
+    "/webhook",
+    cors(corsOptions),
+    express.raw({ type: 'application/json' }),
+    async (req, res) => {
+      const sig = req.headers['stripe-signature'];
+      let event;
 
-    try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        sig,
-        process.env.STRIPE_WEBHOOK_SECRET
-      );
-    } catch (err) {
-      console.error("Webhook signature mismatch:", err.message);
-      return res.status(400).send(`Webhook Error: ${err.message}`);
-    }
-
-    // --- uniquement pour les abonnements utilisateurs ---
-    if (event.type === "customer.subscription.created" || event.type === "invoice.paid") {
       try {
-        const subscription = await stripe.subscriptions.retrieve(event.data.object.id);
-
-        if (subscription.metadata?.userId && subscription.metadata?.plan) {
-          await admin.firestore()
-            .collection("companies")
-            .doc(subscription.metadata.userId)
-            .set({
-              planPaid: true,
-              plan: subscription.metadata.plan,
-              subscriptionId: subscription.id
-            }, { merge: true });
-          await admin.firestore()
-            .collection("companies")
-            .doc(subscription.metadata.userId)
-            .update({
-              subscriptionStatus: "active",
-              plan: subscription.metadata.plan,
-              subscriptionId: subscription.id
-            });
-          console.log(`Abonnement activé pour user ${subscription.metadata.userId}`);
-        }
+        event = stripe.webhooks.constructEvent(
+          req.body,
+          sig,
+          process.env.STRIPE_WEBHOOK_SECRET
+        );
       } catch (err) {
-        console.error("Erreur activation abonnement :", err);
+        console.error("Webhook signature mismatch:", err.message);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
       }
-    }
 
-    // renvoyer 200 à Stripe pour confirmer la réception
-    res.status(200).send('ok');
-  }
-);
-  return app;
+      // --- uniquement pour les abonnements utilisateurs ---
+      if (event.type === "customer.subscription.created" || event.type === "invoice.paid") {
+        try {
+          const subscription = await stripe.subscriptions.retrieve(event.data.object.id);
+
+          if (subscription.metadata?.userId && subscription.metadata?.plan) {
+            await admin.firestore()
+              .collection("companies")
+              .doc(subscription.metadata.userId)
+              .set({
+                planPaid: true,
+                plan: subscription.metadata.plan,
+                subscriptionId: subscription.id
+              }, { merge: true });
+            await admin.firestore()
+              .collection("companies")
+              .doc(subscription.metadata.userId)
+              .update({
+                subscriptionStatus: "active",
+                plan: subscription.metadata.plan,
+                subscriptionId: subscription.id
+              });
+            console.log(`Abonnement activé pour user ${subscription.metadata.userId}`);
+          }
+        } catch (err) {
+          console.error("Erreur activation abonnement :", err);
+        }
+      }
+
+      // renvoyer 200 à Stripe pour confirmer la réception
+      res.status(200).send('ok');
+    }
+  );
+return app;
 }
