@@ -89,7 +89,8 @@ function LoginPage() {
 
   const handleNext = () => { if (validateStep()) setStep(prev => prev + 1); };
   const handleBack = () => setStep(prev => prev - 1);
-  const handleSubmit = async () => {
+
+const handleSubmit = async () => {
   if (!validateStep()) return;
 
   try {
@@ -102,7 +103,7 @@ function LoginPage() {
       user = userCredential.user;
       const userId = user.uid;
 
-      // 2️⃣ Créer docs Firestore pour SIRET et entreprise
+      // 2️⃣ Créer docs Firestore pour SIRET et entreprise, avec role director
       const siretRef = doc(db, "sirets", hotelSiret);
       const companyRef = doc(db, "companies", userId);
 
@@ -117,32 +118,16 @@ function LoginPage() {
           hotelType,
           siret: hotelSiret,
           plan: selectedPlan,
+          role: "director",
           createdAt: new Date(),
         });
       });
 
       // 3️⃣ Récupérer le token pour authentifier les fetchs backend
       const token = await user.getIdToken();
-
-      // console.log("Backend URL:", process.env.REACT_APP_BACKEND_URL);
       console.log("Backend URL:", import.meta.env.VITE_BACKEND_URL);
 
       // 4️⃣ Appeler backend pour créer l’utilisateur côté serveur
-      // const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/create-user`, {
-      //   method: "POST",
-      //   headers: {
-      //     "Content-Type": "application/json",
-      //     "Authorization": `Bearer ${token}`
-      //   },
-      //   body: JSON.stringify({
-      //     email,
-      //     firstName: "",
-      //     lastName: "",
-      //     role: "director",
-      //     hotelUid: userId
-      //   })
-      // });
-
       const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/register-company`, {
         method: "POST",
         headers: {
@@ -158,6 +143,8 @@ function LoginPage() {
           plan: selectedPlan,
         }),
       });
+      // Après la réponse backend
+      await user.getIdToken(true);
 
       if (!response.ok) {
         const errText = await response.text();
@@ -166,7 +153,6 @@ function LoginPage() {
 
       const data = await response.json();
       console.log("Hôtel enregistré côté backend:", data);
-
 
       // 5️⃣ Marquer redirection en cours et créer session Stripe
       setIsRedirecting(true);
@@ -179,9 +165,10 @@ function LoginPage() {
     userCredential = await signInWithEmailAndPassword(auth, email, password);
     user = userCredential.user;
 
-    const idTokenResult = await user.getIdTokenResult();
-    setRole(idTokenResult.claims.role || "director");
-    setManagerServiceId(idTokenResult.claims.serviceId || null);
+    // --- Détection role via document companies ---
+    const companyDoc = await getDoc(doc(db, "companies", user.uid));
+    const userRole = companyDoc.exists() ? "director" : (await user.getIdTokenResult()).claims.role || "manager";
+    setRole(userRole);
 
     navigate("/dashboard");
 
