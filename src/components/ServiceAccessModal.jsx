@@ -9,7 +9,7 @@ function ServiceAccessModal({ service, onClose, hotelUid }) {
 
   const API_URL =
     window.location.hostname === "localhost"
-      ? "http://localhost:4242"
+      ? "http://localhost:4173"
       : "https://us-central1-tipbox-a4f99.cloudfunctions.net/apiV2";
 
   // --- Charger tous les users de l’hôtel ---

@@ -61,7 +61,7 @@ export default function AccountModal({ isOpen, onClose, userId }) {
         <h2 className="text-xl font-bold mb-4">Gestion du compte</h2>
 
         {loading ? (
-          <p>Chargement...</p>
+          <p>AccountModal</p>
         ) : (
           <div className="space-y-3">
             {error && <p className="text-red-500">{error}</p>}

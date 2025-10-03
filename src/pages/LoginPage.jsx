@@ -10,8 +10,9 @@ import { useNavigate } from "react-router-dom";
 import { FaHotel, FaUtensils, FaBuilding, FaMapMarkerAlt, FaPhone, FaSpa } from "react-icons/fa";
 import { doc, runTransaction } from "firebase/firestore";
 import TipBoxLogo from '../assets/TipBox.png';
-// import "dotenv/config";
+import ConsentModal from '../components/ConsentModal';
 
+// import "dotenv/config";
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL;
 console.log("Backend URL:", backendUrl);
@@ -24,6 +25,10 @@ function LoginPage() {
   const navigate = useNavigate();
   const [role, setRole] = useState(null);
   const [managerServiceId, setManagerServiceId] = useState(null);
+
+  // Consentements
+  const [consentEmailMarketing, setConsentEmailMarketing] = useState(false);
+  const [consentTerms, setConsentTerms] = useState(false);
 
   // Infos entreprise
   const [hotelName, setHotelName] = useState("");
@@ -112,7 +117,7 @@ function LoginPage() {
           hotelType,
           siret: hotelSiret,
           plan: selectedPlan,
-          createdAt: new Date()
+          createdAt: new Date(),
         });
       });
 
@@ -122,21 +127,36 @@ function LoginPage() {
       // console.log("Backend URL:", process.env.REACT_APP_BACKEND_URL);
       console.log("Backend URL:", import.meta.env.VITE_BACKEND_URL);
 
-
       // 4️⃣ Appeler backend pour créer l’utilisateur côté serveur
-      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/create-user`, {
+      // const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/create-user`, {
+      //   method: "POST",
+      //   headers: {
+      //     "Content-Type": "application/json",
+      //     "Authorization": `Bearer ${token}`
+      //   },
+      //   body: JSON.stringify({
+      //     email,
+      //     firstName: "",
+      //     lastName: "",
+      //     role: "director",
+      //     hotelUid: userId
+      //   })
+      // });
+
+      const response = await fetch(`${import.meta.env.VITE_BACKEND_URL}/register-company`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
         body: JSON.stringify({
-          email,
-          firstName: "",
-          lastName: "",
-          role: "director",
-          hotelUid: userId
-        })
+          hotelName,
+          hotelAddress,
+          hotelPhone,
+          hotelType,
+          siret: hotelSiret,
+          plan: selectedPlan,
+        }),
       });
 
       if (!response.ok) {
@@ -145,7 +165,8 @@ function LoginPage() {
       }
 
       const data = await response.json();
-      console.log("Utilisateur backend créé:", data);
+      console.log("Hôtel enregistré côté backend:", data);
+
 
       // 5️⃣ Marquer redirection en cours et créer session Stripe
       setIsRedirecting(true);
@@ -176,6 +197,7 @@ function LoginPage() {
   }
 };
 
+
 // -----------------------------
 // Créer session Stripe et rediriger
 // -----------------------------
@@ -198,7 +220,7 @@ const handleSubscriptionCheckout = async (token) => {
     const data = await response.json();
 
     if (data.url) {
-      window.location.href = data.url; // ✅ redirection Stripe
+      window.location.href = data.url;
     } else {
       setError("Impossible de créer la session d’abonnement");
     }
@@ -239,6 +261,10 @@ const handleSubscriptionCheckout = async (token) => {
                 <input type="password" placeholder="Mot de passe" value={password} onChange={e => setPassword(e.target.value)} className="border p-3 rounded w-full shadow-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none" />
               </div>
             )}
+              {/* Intégration du ConsentForm */}
+              <ConsentModal onSubmit={(consent) => {
+                setConsent(consent); // tu crées un useState pour stocker ça dans LoginPage
+              }} />
 
             {step === 2 && (
               <div className="space-y-4 w-80">
