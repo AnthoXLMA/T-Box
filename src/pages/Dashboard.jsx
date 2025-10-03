@@ -19,7 +19,7 @@ import StripeConnectStatus from "../components/StripeConnectStatus";
 const API_URL =
   window.location.hostname === "localhost"
     ? "http://localhost:4173"
-    : "https://us-central1-tipbox-a4f99.cloudfunctions.net/apiV2";
+    : "https://apiv2-xihdunktcq-uc.a.run.app";
 
 function Dashboard() {
   const [services, setServices] = useState([]);
@@ -41,46 +41,50 @@ function Dashboard() {
   const [contactInfo, setContactInfo] = useState("");
   const [sending, setSending] = useState(false);
 
-  let subscriptionStatus = "active"; // Forçage temporaire
+  // let subscriptionStatus = "active";
 
   const navigate = useNavigate();
 
   // --- Auth & récupération services ---
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async user => {
-      if (user) {
-        const idTokenResult = await user.getIdTokenResult();
-        const userRole = idTokenResult.claims.role || "director";
-        const serviceId = idTokenResult.claims.serviceId || null;
+  const unsubscribe = onAuthStateChanged(auth, async user => {
+    if (user) {
+      // 🔄 Force refresh du token pour récupérer les custom claims récents
+      await user.getIdToken(true);
 
-        setUid(user.uid);
-        setRole(userRole);
-        setManagerServiceId(serviceId);
+      const idTokenResult = await user.getIdTokenResult();
+      const userRole = idTokenResult.claims.role || "director";
+      const serviceId = idTokenResult.claims.serviceId || null;
 
-        // --- Vérification abonnement ---
-        // const companyDoc = await getDoc(doc(db, "companies", user.uid));
-        //   if (!companyDoc.exists() || companyDoc.data().subscriptionStatus !== "active") {
-        //     setUserHasPaid(false);
-        //     navigate("/pricing");
-        //     return;
-        //   } else {
-        //     setUserHasPaid(true);
-        //   }
+      setUid(user.uid);
+      setRole(userRole);
+      setManagerServiceId(serviceId);
 
-        const allServices = await fetchServices();
-        setServices(
-          userRole === "manager" && serviceId
-            ? allServices.filter(s => s.id === serviceId)
-            : allServices
-        );
-        setLoadingTips(false);
-      } else {
-        navigate("/login");
-      }
-    });
+      // --- Vérification abonnement ---
+      // const companyDoc = await getDoc(doc(db, "companies", user.uid));
+      //   if (!companyDoc.exists() || companyDoc.data().subscriptionStatus !== "active") {
+      //     setUserHasPaid(false);
+      //     navigate("/pricing");
+      //     return;
+      //   } else {
+      //     setUserHasPaid(true);
+      //   }
 
-    return () => unsubscribe();
-  }, [navigate]);
+      const allServices = await fetchServices();
+      setServices(
+        userRole === "manager" && serviceId
+          ? allServices.filter(s => s.id === serviceId)
+          : allServices
+      );
+      setLoadingTips(false);
+    } else {
+      navigate("/login");
+    }
+  });
+
+  return () => unsubscribe();
+}, [navigate]);
+
 
   // --- Logout ---
   const handleLogout = async () => {

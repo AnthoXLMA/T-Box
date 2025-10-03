@@ -12,7 +12,6 @@ export function createApp({ stripeKey, emailUser, emailPass }) {
   const app = express();
 
   const FRONTEND_URL = process.env.FRONTEND_URL || "https://tipbox-a4f99.web.app";
-
   // --- Middleware CORS global ---
   const corsOptions = {
     origin: ["https://tipbox-a4f99.web.app"],
@@ -56,6 +55,7 @@ export function createApp({ stripeKey, emailUser, emailPass }) {
   const toStrArray = arr => (arr || []).map(String);
 
   async function sendInvitationEmail(email, tempPassword) {
+    console.log(`Envoi email invitation à ${email}`);
     await transporter.sendMail({
       from: `"TipBox" <${emailUser}>`,
       to: email,
@@ -70,7 +70,6 @@ export function createApp({ stripeKey, emailUser, emailPass }) {
     const displayName = userRecord.displayName || `${firstName} ${lastName}`.trim();
     const services = Array.from(new Set([...(userRecord.customClaims?.services || []).map(String), ...toStrArray(serviceIds)]));
     const lockedServices = (userRecord.customClaims?.lockedServices || []).map(String);
-    // const { consent } = req.body;
 
     const doc = {
       email,
@@ -81,53 +80,89 @@ export function createApp({ stripeKey, emailUser, emailPass }) {
       hotelUid: hotelUid || userRecord.customClaims?.hotelUid || null,
       services,
       lockedServices,
-      // consent,
       updatedAt: new Date()
     };
 
+    console.log(`Upsert user doc pour uid=${uid}`, doc);
     await admin.firestore().collection("users").doc(uid).set(doc, { merge: true });
   }
 
-  async function createOrUpdateUser({ email, firstName, lastName, role, hotelUid, serviceIds = [] }) {
-    let userRecord;
-    let isNewUser = false;
-    let tempPassword;
+async function createOrUpdateUser({ email, firstName, lastName, role, hotelUid, serviceIds = [] }) {
+  let userRecord;
+  let isNewUser = false;
+  let tempPassword;
+
+  try {
+    userRecord = await admin.auth().getUserByEmail(email);
+  } catch (err) {
+    if (err.code === "auth/user-not-found") {
+      tempPassword = Math.random().toString(36).slice(-8);
+      userRecord = await admin.auth().createUser({
+        email,
+        password: tempPassword,
+        displayName: `${firstName} ${lastName}`
+      });
+      isNewUser = true;
+      await sendInvitationEmail(email, tempPassword);
+    } else throw err;
+  }
+
+  const currentServices = userRecord.customClaims?.services || [];
+  const newServices = Array.from(new Set([...currentServices.map(String), ...toStrArray(serviceIds)]));
+
+  await admin.auth().setCustomUserClaims(userRecord.uid, {
+    ...userRecord.customClaims,
+    role,
+    hotelUid,
+    services: newServices
+  });
+
+  await upsertUserDoc(userRecord, { firstName, lastName, role, hotelUid, serviceIds: newServices });
+
+  return { uid: userRecord.uid, isNewUser };
+}
+
+  // --- Routes utilisateurs ---
+  app.get("/users", verifyToken, async (req, res) => {
+    const { hotelUid } = req.query;
+    console.log("Requête GET /users pour hotelUid:", hotelUid);
+    if (!hotelUid) return res.status(400).json({ error: "hotelUid manquant" });
 
     try {
-      userRecord = await admin.auth().getUserByEmail(email);
+      const snap = await admin.firestore().collection("users").where("hotelUid", "==", hotelUid).get();
+      const users = snap.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
+      console.log("Utilisateurs récupérés:", users);
+      res.json(users);
     } catch (err) {
-      if (err.code === "auth/user-not-found") {
-        tempPassword = Math.random().toString(36).slice(-8);
-        userRecord = await admin.auth().createUser({
-          email,
-          password: tempPassword,
-          displayName: `${firstName} ${lastName}`
-        });
-        isNewUser = true;
-        await sendInvitationEmail(email, tempPassword);
-      } else throw err;
+      console.error("Erreur récupération utilisateurs", err);
+      res.status(500).json({ error: err.message });
     }
+  });
 
-    const currentServices = userRecord.customClaims?.services || [];
-    const newServices = Array.from(new Set([...currentServices.map(String), ...toStrArray(serviceIds)]));
+// Créer ou mettre à jour un utilisateur
+// app.post("/create-user", verifyToken, requireRole("director", "manager"), async (req, res) => {
+app.post("/create-user", verifyToken, async (req, res) => {
+  console.log("POST /create-user body reçu:", req.body);
+  const { email, firstName, lastName, role, hotelUid, serviceIds = [] } = req.body;
+  if (!email || !role || !hotelUid) return res.status(400).json({ error: "Champs manquants" });
 
-    await admin.auth().setCustomUserClaims(userRecord.uid, {
-      ...userRecord.customClaims,
-      role,
-      hotelUid,
-      services: newServices
-    });
-
-    await upsertUserDoc(userRecord, { firstName, lastName, role, hotelUid, serviceIds: newServices });
-
-    return { uid: userRecord.uid, isNewUser };
+  try {
+    const result = await createOrUpdateUser({ email, firstName, lastName, role, hotelUid, serviceIds });
+    console.log("Utilisateur créé ou mis à jour:", result);
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error("Erreur create-user:", err);
+    res.status(500).json({ error: err.message });
   }
+});
 
 // --- Middleware rôle ---
 function requireRole(...allowedRoles) {
   return (req, res, next) => {
     const userRole = req.user?.role;
+    console.log(`Vérification rôle utilisateur: ${userRole}, roles autorisés: ${allowedRoles}`);
     if (!allowedRoles.includes(userRole)) {
+      console.log("🚫 Accès refusé pour cet utilisateur");
       return res.status(403).json({ error: "Accès refusé : rôle insuffisant" });
     }
     next();
@@ -142,8 +177,11 @@ async function verifyToken(req, res, next) {
     return res.status(403).json({ error: "No token" });
 
   const idToken = authHeader.split("Bearer ")[1];
+  console.log("🔹 Token extrait :", idToken);
+
   try {
     const decodedToken = await admin.auth().verifyIdToken(idToken);
+    console.log("🔹 Token décodé :", decodedToken);
     req.user = decodedToken;
     next();
   } catch (err) {
@@ -152,35 +190,37 @@ async function verifyToken(req, res, next) {
   }
 }
 
-// --- Routes utilisateurs ---
-app.get("/users", verifyToken, async (req, res) => {
-  const { hotelUid } = req.query;
-  if (!hotelUid) return res.status(400).json({ error: "hotelUid manquant" });
+// app.post("/create-user", verifyToken, async (req, res) => {
+//   console.log("Body reçu:", req.body);
 
-  try {
-    const snap = await admin.firestore().collection("users").where("hotelUid", "==", hotelUid).get();
-    const users = snap.docs.map(doc => ({ uid: doc.id, ...doc.data() }));
-    res.json(users);
-  } catch (err) {
-    console.error("Erreur récupération utilisateurs", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+//   const { email, firstName, lastName, role, hotelUid, serviceIds = [] } = req.body;
+//   if (!email || !role || !hotelUid) {
+//     return res.status(400).json({ error: "Champs manquants" });
+//   }
 
-// Créer ou mettre à jour un utilisateur
-app.post("/create-user", verifyToken, requireRole("director", "manager"), async (req, res) => {
-  console.log("Body reçu:", req.body);
-  const { email, firstName, lastName, role, hotelUid, serviceIds = [] } = req.body;
-  if (!email || !role || !hotelUid) return res.status(400).json({ error: "Champs manquants" });
+//   try {
+//     // 1️⃣ Vérification que l'utilisateur connecté est directeur
+//     const decodedToken = req.user; // injecté par verifyToken
+//     if (decodedToken.role !== "director") {
+//       return res.status(403).json({ error: "Accès refusé : seul un directeur peut créer un utilisateur" });
+//     }
 
-  try {
-    const result = await createOrUpdateUser({ email, firstName, lastName, role, hotelUid, serviceIds });
-    res.json({ success: true, ...result });
-  } catch (err) {
-    console.error("Erreur create-user:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+//     // 2️⃣ Vérification que le directeur appartient bien à l'hôtel correspondant
+//     if (decodedToken.hotelUid !== hotelUid) {
+//       return res.status(403).json({ error: "Accès refusé : hotelUid invalide" });
+//     }
+
+//     // 3️⃣ Création ou mise à jour de l'utilisateur
+//     const result = await createOrUpdateUser({ email, firstName, lastName, role, hotelUid, serviceIds });
+
+//     // 4️⃣ Retour OK
+//     res.json({ success: true, ...result });
+//   } catch (err) {
+//     console.error("Erreur create-user:", err);
+//     res.status(500).json({ error: err.message });
+//   }
+// });
+
 
 app.delete("/delete-user", verifyToken, async (req, res) => {
   const uid = req.user.uid;
@@ -282,8 +322,9 @@ app.post("/register-company", verifyToken, async (req, res) => {
   try {
     const { hotelName, hotelAddress, hotelPhone, hotelType, siret, plan } = req.body;
     const uid = req.user.uid; // uid du user connecté (directeur en devenir)
+    const db = admin.firestore();
 
-    if (!siret || !hotelName || !hotelAddress || !hotelPhone || !hotelType || !plan) {
+    if (!siret || !hotelName || !hotelAddress || !hotelPhone || !hotelType || !plan ) {
       return res.status(400).json({ error: "Champs manquants pour l'inscription de l'entreprise" });
     }
 
@@ -312,6 +353,7 @@ app.post("/register-company", verifyToken, async (req, res) => {
         hotelType,
         siret,
         plan,
+        role: "director",
         createdAt: new Date(),
       });
     });
@@ -319,9 +361,10 @@ app.post("/register-company", verifyToken, async (req, res) => {
     // 🔑 Met à jour le rôle du user → director
     await admin.auth().setCustomUserClaims(uid, {
       role: "director",
-      serviceId: uid, // très pratique pour requêter
+      serviceId: uid,
+      hotelUid: uid,
     });
-
+    await auth.currentUser.getIdToken(true);
     // Force le refresh du token côté frontend
     const userRecord = await admin.auth().getUser(uid);
 
@@ -338,32 +381,9 @@ app.post("/register-company", verifyToken, async (req, res) => {
 
   } catch (err) {
     console.error("Erreur /register-company:", err);
-    res.status(500).json({ error: err.message || "Erreur serveur" });
+    res.status(400).json({ error: err.message || "Erreur serveur" });
   }
 });
-
-
-// app.post("/register-company", verifyToken, async (req, res) => {
-//   const { siret } = req.body;
-//   if (!siret) return res.status(400).json({ error: "SIRET manquant" });
-
-//   try {
-//     const companyInfo = await verifySiret(siret);
-
-//     await admin.firestore().collection("companies").doc(req.user.uid).set({
-//       siret,
-//       companyName: companyInfo.name,
-//       address: companyInfo.address,
-//       verified: true,
-//       updatedAt: new Date()
-//     });
-
-//     res.json({ success: true, companyInfo });
-//   } catch (err) {
-//     console.error(err);
-//     res.status(400).json({ error: err.message });
-//   }
-// });
 
 // app.post("/verify-siret", verifyToken, async (req, res) => {
 //   const { siret } = req.body;
@@ -674,54 +694,60 @@ app.post("/remove-service-user", verifyToken, async (req, res) => {
     }
   });
 
-app.post("/create-connected-account", verifyToken, async (req, res) => {
-  console.log("🔹 req.user:", req.user);
-  console.log("Création compte Stripe pour :", req.user.email);
-  try {
-    const account = await stripe.accounts.create({
-      type: "express",
-      country: "FR",
-      email: req.user.email,
-    });
+// --- Exemple Stripe Connect route ---
+  app.post("/create-connected-account", verifyToken, async (req, res) => {
+    console.log("🔹 req.user:", req.user);
+    console.log("Création compte Stripe pour :", req.user?.email);
+    try {
+      const account = await stripe.accounts.create({
+        type: "express",
+        country: "FR",
+        email: req.user.email,
+      });
+      console.log("Compte Stripe créé:", account.id);
 
-    const accountLink = await stripe.accountLinks.create({
-      account: account.id,
-      refresh_url: `${FRONTEND_URL}/dashboard`,
-      return_url: `${FRONTEND_URL}/dashboard?connected=success`,
-      type: "account_onboarding",
-    });
+      const accountLink = await stripe.accountLinks.create({
+        account: account.id,
+        refresh_url: `${FRONTEND_URL}/dashboard`,
+        return_url: `${FRONTEND_URL}/dashboard?connected=success`,
+        type: "account_onboarding",
+      });
+      console.log("AccountLink créé:", accountLink.url);
 
-    await admin.firestore().collection("companies").doc(req.user.uid).set({
-      stripeAccountId: account.id,
-    }, { merge: true });
+      await admin.firestore().collection("companies").doc(req.user.uid).set({
+        stripeAccountId: account.id,
+      }, { merge: true });
 
-    res.json({ url: accountLink.url });
-  } catch (err) {
-    console.error("Erreur création compte Stripe Connect:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json({ url: accountLink.url });
+    } catch (err) {
+      console.error("Erreur création compte Stripe Connect:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
-app.post("/create-payment-intent", async (req, res) => {
-  try {
-    const { amount, connectedAccountId } = req.body;
+  app.post("/create-payment-intent", async (req, res) => {
+    console.log("POST /create-payment-intent body reçu:", req.body);
+    try {
+      const { amount, connectedAccountId } = req.body;
+      console.log(`Création PaymentIntent pour montant=${amount}, destination=${connectedAccountId}`);
 
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount,
-      currency: "eur",
-      payment_method_types: ["card"],
-      transfer_data: {
-        destination: connectedAccountId,
-      },
-      application_fee_amount: Math.floor(amount * 0.10),
-    });
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount,
+        currency: "eur",
+        payment_method_types: ["card"],
+        transfer_data: {
+          destination: connectedAccountId,
+        },
+        application_fee_amount: Math.floor(amount * 0.10),
+      });
 
-    res.json({ clientSecret: paymentIntent.client_secret });
-  } catch (err) {
-    console.error("Erreur création PaymentIntent:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+      console.log("PaymentIntent créé, client_secret:", paymentIntent.client_secret);
+      res.json({ clientSecret: paymentIntent.client_secret });
+    } catch (err) {
+      console.error("Erreur création PaymentIntent:", err);
+      res.status(500).json({ error: err.message });
+    }
+  });
 
 
   // // --- Stripe Webhook ---
